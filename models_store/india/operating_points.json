@@ -1,0 +1,59 @@
+{
+  "points": [
+    {
+      "operating_point": "default (PD >= 50%)",
+      "threshold": 0.5,
+      "threshold_exact": 0.5,
+      "accuracy": 0.9628,
+      "precision": 0.6567,
+      "recall_capture": 0.09,
+      "f1": 0.1583,
+      "flag_rate": 0.0053
+    },
+    {
+      "operating_point": "F1-optimal",
+      "threshold": 0.1579,
+      "threshold_exact": 0.15789473684210525,
+      "accuracy": 0.9427,
+      "precision": 0.3198,
+      "recall_capture": 0.4192,
+      "f1": 0.3628,
+      "flag_rate": 0.051
+    },
+    {
+      "operating_point": "accuracy-optimal",
+      "threshold": 0.4203,
+      "threshold_exact": 0.42028985507246375,
+      "accuracy": 0.9633,
+      "precision": 0.6014,
+      "recall_capture": 0.1697,
+      "f1": 0.2648,
+      "flag_rate": 0.011
+    },
+    {
+      "operating_point": "top-10% review capacity",
+      "threshold": 0.1019,
+      "threshold_exact": 0.10191082802547771,
+      "accuracy": 0.8882,
+      "precision": 0.1966,
+      "recall_capture": 0.6074,
+      "f1": 0.297,
+      "flag_rate": 0.1202
+    },
+    {
+      "operating_point": "max-precision (60.1%)",
+      "threshold": 0.4203,
+      "threshold_exact": 0.42028985507246375,
+      "accuracy": 0.9633,
+      "precision": 0.6014,
+      "recall_capture": 0.1697,
+      "f1": 0.2648,
+      "flag_rate": 0.011
+    }
+  ],
+  "max_accuracy": 0.9633,
+  "meets_90pct_accuracy": true,
+  "base_default_rate": 0.0389,
+  "dummy_accuracy": 0.9611,
+  "note": "Accuracy reported at explicit operating points per the bank's stated >=90% requirement; capture (recall) and flag rate shown beside it so the accuracy figure stays honest about trade-offs. dummy_accuracy is what a predict-nothing classifier scores."
+}

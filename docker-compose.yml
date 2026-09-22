@@ -1,0 +1,48 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: drishti_user
+      POSTGRES_PASSWORD: drishti_pass
+      POSTGRES_DB: drishti_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U drishti_user -d drishti_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    image: idbi-ps4-risk-engine:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://drishti_user:drishti_pass@postgres:5432/drishti_db
+      - WEB_CONCURRENCY=2
+      - OMP_NUM_THREADS=1
+    ports:
+      - "8000:8000"
+    command: ["api"]
+
+
+  batch:
+    image: idbi-ps4-risk-engine:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://drishti_user:drishti_pass@postgres:5432/drishti_db
+    command: ["batch", "--input", "data/processed/msme_india.parquet", "--segment", "msme_india"]
+    volumes:
+      - ./data/processed:/app/data/processed:ro
+      - ./models_store:/app/models_store
+    profiles:
+      - tools
+
+volumes:
+  pgdata:

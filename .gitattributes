@@ -1,0 +1,20 @@
+# Normalise text to LF inside the repository. Without this, a clone on Windows
+# checks entrypoint.sh out with CRLF, and the Dockerfile then copies a script the
+# container cannot run ("/bin/sh^M: bad interpreter").
+* text=auto
+
+*.sh      text eol=lf
+entrypoint.sh text eol=lf
+Dockerfile    text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+
+# Model bundles and data are binary. Declare them so text normalisation can never
+# rewrite bytes inside a pickle or a parquet file.
+*.pkl     binary
+*.joblib  binary
+*.parquet binary
+*.png     binary
+*.jpg     binary
+*.pdf     binary
+*.xlsx    binary

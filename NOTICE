@@ -1,0 +1,16 @@
+DRISHTI — 12-month loan stress prediction
+Default Risk Intelligence & Stress-Horizon Tracking Initiative
+
+Copyright 2026 Team Megalodon
+
+Built for IDBI Innovate 2026, Problem Statement 4 (MSME credit · predictive AI ·
+risk management).
+
+Licensed under the Apache License, Version 2.0. You may obtain a copy of the
+License in the LICENSE file at the root of this repository, or at
+http://www.apache.org/licenses/LICENSE-2.0
+
+The India MSME and IDBI sandbox loan books in this repository are synthetic,
+generated deterministically by src/ingestion/. The other three books are public
+datasets (SBA 7(a), Home Credit Default Risk, Give Me Some Credit) and are
+downloaded at run time under their own terms; they are not redistributed here.

@@ -1,0 +1,23 @@
+{
+  "loan_id": "NARMADA-001",
+  "sub_segment": "small",
+  "sector": "auto_components",
+  "state": "GJ",
+  "ticket_size": 4500000,
+  "tenure_months": 48,
+  "vintage_months": 36,
+  "cmr": 4,
+  "enquiries_6m": 2,
+  "interest_spread_bps": 320,
+  "gst_filing_delay_days": 45,
+  "gst_turnover_trend_pct": -18,
+  "itc_mismatch_flag": 1,
+  "emi_bounce_6m": 3,
+  "cashflow_volatility": 0.62,
+  "balance_trend_pct": -14,
+  "credit_turnover_ratio": 0.85,
+  "current_ratio": 0.92,
+  "electricity_consumption_trend_pct": -22,
+  "upi_inflow_stability": 0.38,
+  "officer_note": "Narmada Precision Components — RM visit 12-Jun: GST returns delayed two consecutive months; supplier payment disputes noted. Earlier assurance to regularise EMI bounces was not kept. Unit reports order book pressure from anchor OEM slowdown."
+}

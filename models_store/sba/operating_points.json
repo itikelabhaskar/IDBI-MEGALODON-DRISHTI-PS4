@@ -1,0 +1,48 @@
+{
+  "points": [
+    {
+      "operating_point": "default (PD >= 50%)",
+      "threshold": 0.5,
+      "threshold_exact": 0.5,
+      "accuracy": 0.8893,
+      "precision": 0.7518,
+      "recall_capture": 0.8254,
+      "f1": 0.7869,
+      "flag_rate": 0.2718
+    },
+    {
+      "operating_point": "F1-optimal",
+      "threshold": 0.5177,
+      "threshold_exact": 0.5177165354330706,
+      "accuracy": 0.8893,
+      "precision": 0.7518,
+      "recall_capture": 0.8253,
+      "f1": 0.7868,
+      "flag_rate": 0.2718
+    },
+    {
+      "operating_point": "accuracy-optimal",
+      "threshold": 0.6768,
+      "threshold_exact": 0.6767676767676766,
+      "accuracy": 0.8935,
+      "precision": 0.8063,
+      "recall_capture": 0.7497,
+      "f1": 0.777,
+      "flag_rate": 0.2302
+    },
+    {
+      "operating_point": "top-10% review capacity",
+      "threshold": 0.9359,
+      "threshold_exact": 0.9358633776091082,
+      "accuracy": 0.8445,
+      "precision": 0.9263,
+      "recall_capture": 0.4043,
+      "f1": 0.5629,
+      "flag_rate": 0.108
+    }
+  ],
+  "max_accuracy": 0.8935,
+  "meets_90pct_accuracy": false,
+  "base_default_rate": 0.2476,
+  "note": "Accuracy reported at explicit operating points per the bank's stated >=90% requirement; capture (recall) and flag rate shown beside it so the accuracy figure stays honest about trade-offs."
+}

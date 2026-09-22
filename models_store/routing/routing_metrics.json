@@ -1,0 +1,50 @@
+{
+  "results": {
+    "100": {
+      "tabpfn_auc_mean": 0.7874,
+      "tabpfn_auc_std": 0.0342,
+      "lgbm_auc_mean": 0.7442,
+      "lgbm_auc_std": 0.025,
+      "delta_tabpfn_minus_lgbm": 0.0432
+    },
+    "200": {
+      "tabpfn_auc_mean": 0.8186,
+      "tabpfn_auc_std": 0.0479,
+      "lgbm_auc_mean": 0.7227,
+      "lgbm_auc_std": 0.027,
+      "delta_tabpfn_minus_lgbm": 0.096
+    },
+    "400": {
+      "tabpfn_auc_mean": 0.864,
+      "tabpfn_auc_std": 0.0191,
+      "lgbm_auc_mean": 0.7741,
+      "lgbm_auc_std": 0.004,
+      "delta_tabpfn_minus_lgbm": 0.0898
+    },
+    "800": {
+      "tabpfn_auc_mean": 0.8992,
+      "tabpfn_auc_std": 0.0117,
+      "lgbm_auc_mean": 0.8331,
+      "lgbm_auc_std": 0.0132,
+      "delta_tabpfn_minus_lgbm": 0.0661
+    },
+    "1000": {
+      "tabpfn_auc_mean": 0.9108,
+      "tabpfn_auc_std": 0.0079,
+      "lgbm_auc_mean": 0.8324,
+      "lgbm_auc_std": 0.0207,
+      "delta_tabpfn_minus_lgbm": 0.0785
+    }
+  },
+  "routing_rule": "route segments with < ~1000 training rows to TabPFN, else calibrated LightGBM",
+  "meta": {
+    "seeds": [
+      42,
+      7,
+      123
+    ],
+    "n_estimators": 8,
+    "test_slice": 5000,
+    "model": "TabPFN v2 (Prior-Labs/TabPFN-v2-clf) vs LightGBM"
+  }
+}

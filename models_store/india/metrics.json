@@ -1,0 +1,178 @@
+{
+  "overall": {
+    "lightgbm_raw": {
+      "roc_auc": 0.8644,
+      "gini": 0.7287,
+      "ks": 0.5712,
+      "pr_auc": 0.3256,
+      "capture_top_decile": 0.5665,
+      "capture_top_5pct": 0.4172,
+      "lift_top_decile": 5.6606,
+      "brier": 0.036,
+      "default_rate": 0.0389,
+      "n": 12571.0
+    },
+    "lightgbm_calibrated": {
+      "roc_auc": 0.8631,
+      "gini": 0.7262,
+      "ks": 0.5672,
+      "pr_auc": 0.3077,
+      "capture_top_decile": 0.5726,
+      "capture_top_5pct": 0.4172,
+      "lift_top_decile": 5.7219,
+      "brier": 0.0311,
+      "default_rate": 0.0389,
+      "n": 12571.0
+    }
+  },
+  "by_sector": {
+    "medium": {
+      "roc_auc": 0.8607,
+      "gini": 0.7215,
+      "ks": 0.6022,
+      "pr_auc": 0.1621,
+      "capture_top_decile": 0.64,
+      "capture_top_5pct": 0.52,
+      "lift_top_decile": 6.3738,
+      "brier": 0.0198,
+      "default_rate": 0.0206,
+      "n": 1215.0
+    },
+    "micro": {
+      "roc_auc": 0.8539,
+      "gini": 0.7078,
+      "ks": 0.5474,
+      "pr_auc": 0.3224,
+      "capture_top_decile": 0.563,
+      "capture_top_5pct": 0.3988,
+      "lift_top_decile": 5.6305,
+      "brier": 0.0357,
+      "default_rate": 0.0452,
+      "n": 7550.0
+    },
+    "small": {
+      "roc_auc": 0.8875,
+      "gini": 0.7749,
+      "ks": 0.6273,
+      "pr_auc": 0.3237,
+      "capture_top_decile": 0.5935,
+      "capture_top_5pct": 0.4146,
+      "lift_top_decile": 5.9287,
+      "brier": 0.0256,
+      "default_rate": 0.0323,
+      "n": 3806.0
+    }
+  },
+  "meta": {
+    "seed": 42,
+    "n_trials": 30,
+    "best_params": {
+      "num_leaves": 47,
+      "learning_rate": 0.012756500450238548,
+      "min_child_samples": 165,
+      "subsample": 0.9989879313923893,
+      "colsample_bytree": 0.6282572457368231,
+      "reg_alpha": 1.481093653451645,
+      "reg_lambda": 6.098727071753376e-06
+    },
+    "ablation_staircase": [
+      {
+        "stage": "structured only",
+        "roc_auc": 0.6099,
+        "roc_auc_std": 0.0056,
+        "capture_top_decile": 0.1691,
+        "capture_top_decile_std": 0.0054,
+        "seeds": [
+          42,
+          7,
+          123
+        ]
+      },
+      {
+        "stage": "+ GST / AA cash-flow",
+        "roc_auc": 0.8515,
+        "roc_auc_std": 0.0079,
+        "capture_top_decile": 0.5433,
+        "capture_top_decile_std": 0.0179,
+        "seeds": [
+          42,
+          7,
+          123
+        ]
+      },
+      {
+        "stage": "+ officer notes (unstructured)",
+        "roc_auc": 0.862,
+        "roc_auc_std": 0.0022,
+        "capture_top_decile": 0.5753,
+        "capture_top_decile_std": 0.0059,
+        "seeds": [
+          42,
+          7,
+          123
+        ]
+      },
+      {
+        "stage": "+ supplier graph (contagion)",
+        "roc_auc": 0.8449,
+        "roc_auc_std": 0.0219,
+        "capture_top_decile": 0.5153,
+        "capture_top_decile_std": 0.059,
+        "seeds": [
+          42,
+          7,
+          123
+        ]
+      }
+    ],
+    "monotone_constraints": {
+      "gst_filing_delay_days": 1,
+      "gst_turnover_trend_pct": -1,
+      "itc_mismatch_flag": 1,
+      "emi_bounce_6m": 1,
+      "cashflow_volatility": 1,
+      "balance_trend_pct": -1,
+      "current_ratio": -1,
+      "cmr": 1,
+      "enquiries_6m": 1,
+      "interest_spread_bps": 1,
+      "note_payment_promise_broken": 1,
+      "note_business_disruption": 1,
+      "note_stock_statement_delay": 1,
+      "note_dispute_litigation": 1,
+      "note_positive_outlook": -1,
+      "note_sentiment": -1,
+      "nbr_stress_score": 1,
+      "nbr_bounce_share": 1,
+      "electricity_consumption_trend_pct": -1,
+      "upi_inflow_stability": -1
+    },
+    "psi_train_vs_test": {
+      "ticket_size": 0.0009,
+      "tenure_months": 0.001,
+      "vintage_months": 0.0007,
+      "cmr": 0.0006,
+      "enquiries_6m": 0.0008,
+      "interest_spread_bps": 0.0018,
+      "gst_filing_delay_days": 0.0011,
+      "gst_turnover_trend_pct": 0.0009,
+      "itc_mismatch_flag": 0.0,
+      "emi_bounce_6m": 0.0,
+      "cashflow_volatility": 0.0009,
+      "balance_trend_pct": 0.0003,
+      "credit_turnover_ratio": 0.0007,
+      "current_ratio": 0.0012,
+      "electricity_consumption_trend_pct": 0.0005,
+      "upi_inflow_stability": 0.0006,
+      "note_payment_promise_broken": 0.0,
+      "note_business_disruption": 0.0,
+      "note_stock_statement_delay": 0.0,
+      "note_dispute_litigation": 0.0,
+      "note_positive_outlook": 0.0,
+      "note_sentiment": 0.0,
+      "nbr_stress_score": 0.0002,
+      "nbr_bounce_share": 0.0004
+    },
+    "data_note": "SYNTHETIC data calibrated to SIDBI-TransUnion MSME Pulse priors (micro~4.5%, small~3%, medium~2% 12m stress). Officer-note and supplier-graph lifts are causal-by-construction, not label-leaked."
+  }
+}

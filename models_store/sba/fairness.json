@@ -1,0 +1,431 @@
+{
+  "segment": "msme_sba",
+  "headline_attribute": "state",
+  "disparate_impact_ratio": 0.3872,
+  "passes_80pct_rule": false,
+  "worst_attribute": "state",
+  "worst_disparate_impact_ratio": 0.3872,
+  "all_attributes_pass": false,
+  "failing_attributes": [
+    "state"
+  ],
+  "audits": {
+    "state": {
+      "attribute": "state",
+      "flag_threshold": 0.16,
+      "per_group": [
+        {
+          "group": "FL",
+          "n": 4125,
+          "flag_rate": 0.5113,
+          "mean_pd": 0.4123,
+          "auc": 0.9518,
+          "default_rate": 0.4121
+        },
+        {
+          "group": "GA",
+          "n": 2197,
+          "flag_rate": 0.5075,
+          "mean_pd": 0.416,
+          "auc": 0.9559,
+          "default_rate": 0.4092
+        },
+        {
+          "group": "NV",
+          "n": 756,
+          "flag_rate": 0.4722,
+          "mean_pd": 0.3741,
+          "auc": 0.957,
+          "default_rate": 0.418
+        },
+        {
+          "group": "AL",
+          "n": 764,
+          "flag_rate": 0.4476,
+          "mean_pd": 0.3411,
+          "auc": 0.9349,
+          "default_rate": 0.3128
+        },
+        {
+          "group": "TN",
+          "n": 1052,
+          "flag_rate": 0.4449,
+          "mean_pd": 0.3186,
+          "auc": 0.8949,
+          "default_rate": 0.346
+        },
+        {
+          "group": "SC",
+          "n": 565,
+          "flag_rate": 0.4442,
+          "mean_pd": 0.3209,
+          "auc": 0.9147,
+          "default_rate": 0.3611
+        },
+        {
+          "group": "NJ",
+          "n": 2016,
+          "flag_rate": 0.4281,
+          "mean_pd": 0.3391,
+          "auc": 0.9563,
+          "default_rate": 0.3497
+        },
+        {
+          "group": "DC",
+          "n": 150,
+          "flag_rate": 0.4267,
+          "mean_pd": 0.3225,
+          "auc": 0.927,
+          "default_rate": 0.2933
+        },
+        {
+          "group": "CA",
+          "n": 11439,
+          "flag_rate": 0.4201,
+          "mean_pd": 0.3385,
+          "auc": 0.9647,
+          "default_rate": 0.352
+        },
+        {
+          "group": "DE",
+          "n": 180,
+          "flag_rate": 0.4167,
+          "mean_pd": 0.3222,
+          "auc": 0.9328,
+          "default_rate": 0.3222
+        },
+        {
+          "group": "MD",
+          "n": 1239,
+          "flag_rate": 0.4124,
+          "mean_pd": 0.3171,
+          "auc": 0.9363,
+          "default_rate": 0.3035
+        },
+        {
+          "group": "MS",
+          "n": 1213,
+          "flag_rate": 0.3982,
+          "mean_pd": 0.2693,
+          "auc": 0.8653,
+          "default_rate": 0.1929
+        },
+        {
+          "group": "VA",
+          "n": 1617,
+          "flag_rate": 0.397,
+          "mean_pd": 0.2876,
+          "auc": 0.9321,
+          "default_rate": 0.2529
+        },
+        {
+          "group": "NC",
+          "n": 1885,
+          "flag_rate": 0.3931,
+          "mean_pd": 0.2731,
+          "auc": 0.9119,
+          "default_rate": 0.2462
+        },
+        {
+          "group": "AZ",
+          "n": 2154,
+          "flag_rate": 0.3886,
+          "mean_pd": 0.3037,
+          "auc": 0.9532,
+          "default_rate": 0.3305
+        },
+        {
+          "group": "AR",
+          "n": 548,
+          "flag_rate": 0.3814,
+          "mean_pd": 0.2669,
+          "auc": 0.9048,
+          "default_rate": 0.177
+        },
+        {
+          "group": "TX",
+          "n": 6730,
+          "flag_rate": 0.3691,
+          "mean_pd": 0.2813,
+          "auc": 0.9449,
+          "default_rate": 0.2428
+        },
+        {
+          "group": "IL",
+          "n": 3790,
+          "flag_rate": 0.3668,
+          "mean_pd": 0.2908,
+          "auc": 0.9553,
+          "default_rate": 0.2836
+        },
+        {
+          "group": "LA",
+          "n": 1125,
+          "flag_rate": 0.3653,
+          "mean_pd": 0.2577,
+          "auc": 0.917,
+          "default_rate": 0.2284
+        },
+        {
+          "group": "OR",
+          "n": 1478,
+          "flag_rate": 0.3532,
+          "mean_pd": 0.2558,
+          "auc": 0.9319,
+          "default_rate": 0.205
+        },
+        {
+          "group": "MI",
+          "n": 2752,
+          "flag_rate": 0.3517,
+          "mean_pd": 0.2683,
+          "auc": 0.9387,
+          "default_rate": 0.1744
+        },
+        {
+          "group": "NY",
+          "n": 6381,
+          "flag_rate": 0.3462,
+          "mean_pd": 0.282,
+          "auc": 0.9634,
+          "default_rate": 0.2628
+        },
+        {
+          "group": "KY",
+          "n": 982,
+          "flag_rate": 0.3452,
+          "mean_pd": 0.2596,
+          "auc": 0.9074,
+          "default_rate": 0.1884
+        },
+        {
+          "group": "IN",
+          "n": 2043,
+          "flag_rate": 0.3436,
+          "mean_pd": 0.2481,
+          "auc": 0.9214,
+          "default_rate": 0.1826
+        },
+        {
+          "group": "WA",
+          "n": 2540,
+          "flag_rate": 0.3406,
+          "mean_pd": 0.2562,
+          "auc": 0.9562,
+          "default_rate": 0.2358
+        },
+        {
+          "group": "WY",
+          "n": 247,
+          "flag_rate": 0.3401,
+          "mean_pd": 0.2341,
+          "auc": 0.7864,
+          "default_rate": 0.1134
+        },
+        {
+          "group": "OK",
+          "n": 974,
+          "flag_rate": 0.3388,
+          "mean_pd": 0.2403,
+          "auc": 0.9349,
+          "default_rate": 0.1817
+        },
+        {
+          "group": "WV",
+          "n": 313,
+          "flag_rate": 0.3355,
+          "mean_pd": 0.2338,
+          "auc": 0.8961,
+          "default_rate": 0.1661
+        },
+        {
+          "group": "MO",
+          "n": 2025,
+          "flag_rate": 0.3294,
+          "mean_pd": 0.2385,
+          "auc": 0.9196,
+          "default_rate": 0.197
+        },
+        {
+          "group": "UT",
+          "n": 3937,
+          "flag_rate": 0.3289,
+          "mean_pd": 0.2474,
+          "auc": 0.9516,
+          "default_rate": 0.2967
+        },
+        {
+          "group": "CO",
+          "n": 2472,
+          "flag_rate": 0.3281,
+          "mean_pd": 0.2612,
+          "auc": 0.9568,
+          "default_rate": 0.2326
+        },
+        {
+          "group": "ID",
+          "n": 1177,
+          "flag_rate": 0.3186,
+          "mean_pd": 0.2376,
+          "auc": 0.9533,
+          "default_rate": 0.2362
+        },
+        {
+          "group": "KS",
+          "n": 1087,
+          "flag_rate": 0.3128,
+          "mean_pd": 0.2293,
+          "auc": 0.9223,
+          "default_rate": 0.1352
+        },
+        {
+          "group": "NE",
+          "n": 818,
+          "flag_rate": 0.3117,
+          "mean_pd": 0.214,
+          "auc": 0.8942,
+          "default_rate": 0.1235
+        },
+        {
+          "group": "CT",
+          "n": 886,
+          "flag_rate": 0.307,
+          "mean_pd": 0.2317,
+          "auc": 0.9506,
+          "default_rate": 0.1941
+        },
+        {
+          "group": "NM",
+          "n": 526,
+          "flag_rate": 0.3061,
+          "mean_pd": 0.227,
+          "auc": 0.94,
+          "default_rate": 0.1768
+        },
+        {
+          "group": "PA",
+          "n": 2569,
+          "flag_rate": 0.304,
+          "mean_pd": 0.2181,
+          "auc": 0.938,
+          "default_rate": 0.1678
+        },
+        {
+          "group": "IA",
+          "n": 1178,
+          "flag_rate": 0.3039,
+          "mean_pd": 0.2254,
+          "auc": 0.8715,
+          "default_rate": 0.1528
+        },
+        {
+          "group": "HI",
+          "n": 641,
+          "flag_rate": 0.3011,
+          "mean_pd": 0.2211,
+          "auc": 0.9459,
+          "default_rate": 0.2278
+        },
+        {
+          "group": "OH",
+          "n": 4377,
+          "flag_rate": 0.2879,
+          "mean_pd": 0.2154,
+          "auc": 0.9585,
+          "default_rate": 0.1725
+        },
+        {
+          "group": "NH",
+          "n": 915,
+          "flag_rate": 0.2831,
+          "mean_pd": 0.2161,
+          "auc": 0.9305,
+          "default_rate": 0.1366
+        },
+        {
+          "group": "VT",
+          "n": 505,
+          "flag_rate": 0.2634,
+          "mean_pd": 0.1698,
+          "auc": 0.8825,
+          "default_rate": 0.1149
+        },
+        {
+          "group": "MN",
+          "n": 3396,
+          "flag_rate": 0.2597,
+          "mean_pd": 0.1939,
+          "auc": 0.921,
+          "default_rate": 0.1499
+        },
+        {
+          "group": "MT",
+          "n": 887,
+          "flag_rate": 0.2548,
+          "mean_pd": 0.1518,
+          "auc": 0.7969,
+          "default_rate": 0.1127
+        },
+        {
+          "group": "WI",
+          "n": 3086,
+          "flag_rate": 0.2521,
+          "mean_pd": 0.1873,
+          "auc": 0.9179,
+          "default_rate": 0.1491
+        },
+        {
+          "group": "RI",
+          "n": 515,
+          "flag_rate": 0.233,
+          "mean_pd": 0.1909,
+          "auc": 0.9435,
+          "default_rate": 0.1359
+        },
+        {
+          "group": "MA",
+          "n": 2452,
+          "flag_rate": 0.2329,
+          "mean_pd": 0.1841,
+          "auc": 0.9382,
+          "default_rate": 0.124
+        },
+        {
+          "group": "ME",
+          "n": 768,
+          "flag_rate": 0.2292,
+          "mean_pd": 0.164,
+          "auc": 0.918,
+          "default_rate": 0.1094
+        },
+        {
+          "group": "AK",
+          "n": 166,
+          "flag_rate": 0.2289,
+          "mean_pd": 0.1547,
+          "auc": 0.8851,
+          "default_rate": 0.0843
+        },
+        {
+          "group": "SD",
+          "n": 473,
+          "flag_rate": 0.2199,
+          "mean_pd": 0.1408,
+          "auc": 0.9279,
+          "default_rate": 0.1057
+        },
+        {
+          "group": "ND",
+          "n": 586,
+          "flag_rate": 0.198,
+          "mean_pd": 0.1375,
+          "auc": 0.8891,
+          "default_rate": 0.058
+        }
+      ],
+      "disparate_impact_ratio": 0.3872,
+      "passes_80pct_rule": false
+    }
+  },
+  "note": "Disparate impact ratio is min/max selection rate across groups; the 80% rule treats >=0.80 as passing. These are the attributes carried on the canonical frame, not legally protected characteristics, which the bank holds and we do not. Branch and region are excluded from the model by a regression test and appear here only as routing metadata."
+}

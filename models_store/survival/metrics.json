@@ -1,0 +1,32 @@
+{
+  "survival_pd12_vs_true12m": {
+    "roc_auc": 0.8004,
+    "gini": 0.6008,
+    "ks": 0.5809,
+    "pr_auc": 0.0756,
+    "capture_top_decile": 0.6456,
+    "capture_top_5pct": 0.6329,
+    "lift_top_decile": 6.4537,
+    "brier": 0.0289,
+    "default_rate": 0.0061,
+    "n": 12976
+  },
+  "binary_model_vs_true12m": {
+    "roc_auc": 0.8036,
+    "gini": 0.6071,
+    "ks": 0.6083,
+    "pr_auc": 0.0148,
+    "capture_top_decile": 0.2025,
+    "capture_top_5pct": 0.0633,
+    "lift_top_decile": 2.0247,
+    "brier": 0.2383,
+    "default_rate": 0.0061,
+    "n": 12976
+  },
+  "meta": {
+    "loans": 120000,
+    "horizon_quarters": 20,
+    "seed": 42,
+    "note": "Charge-off dates used for label construction only. Censored (paid) loans observed to term. PD@12m evaluated against the true 12-month default label \u2014 the problem statement's task."
+  }
+}

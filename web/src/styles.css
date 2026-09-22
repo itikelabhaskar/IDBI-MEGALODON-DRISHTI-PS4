@@ -1,0 +1,324 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * DRISHTI — design tokens (IDBI Innovate 26 · PS-4)
+ * Light theme is canonical; dark variables are placeholders for future work.
+ */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-dark: var(--primary-dark);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-band-a: var(--band-a);
+  --color-band-b: var(--band-b);
+  --color-band-c: var(--band-c);
+  --color-band-d: var(--band-d);
+  --color-positive: var(--positive);
+  --color-negative: var(--negative);
+  --color-surface: var(--surface);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+:root {
+  --radius: 0.5rem;
+
+  /* Surfaces — deeper app canvas so white cards read as elevated, not washed out */
+  --background: oklch(0.955 0.008 185); /* cool slate-teal wash */
+  --surface: oklch(1 0 0); /* white cards */
+  --foreground: oklch(0.19 0.021 245); /* near slate-950 for strong contrast */
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.19 0.021 245);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.19 0.021 245);
+
+  /* IDBI deep teal-green */
+  --primary: oklch(0.46 0.082 178); /* ~#0A6A5B — richer IDBI teal */
+  --primary-foreground: oklch(0.99 0 0);
+  --primary-dark: oklch(0.34 0.062 178); /* ~#06463E */
+
+  --secondary: oklch(0.955 0.012 178);
+  --secondary-foreground: oklch(0.28 0.045 178);
+
+  --muted: oklch(0.955 0.008 215);
+  --muted-foreground: oklch(0.44 0.024 245); /* darker so labels aren't faint */
+
+  /* Amber accent — use sparingly */
+  --accent: oklch(0.79 0.16 75); /* #F59E0B */
+  --accent-foreground: oklch(0.21 0.02 240);
+
+  --destructive: oklch(0.585 0.225 27);
+  --destructive-foreground: oklch(0.99 0 0);
+
+  --border: oklch(0.885 0.01 185); /* darker hairline for real definition */
+  --input: oklch(0.9 0.01 185);
+  --ring: oklch(0.46 0.082 178);
+
+  /* Risk bands — a touch more saturated so the decision reads loud */
+  --band-a: oklch(0.6 0.17 155); /* emerald */
+  --band-b: oklch(0.58 0.16 235); /* teal/blue */
+  --band-c: oklch(0.74 0.17 70); /* amber */
+  --band-d: oklch(0.575 0.23 27); /* red */
+
+  /* Reason-code polarity */
+  --positive: oklch(0.56 0.16 155);
+  --negative: oklch(0.585 0.225 30);
+
+  /* Charts */
+  --chart-1: oklch(0.46 0.082 178);
+  --chart-2: oklch(0.58 0.16 235);
+  --chart-3: oklch(0.74 0.17 70);
+  --chart-4: oklch(0.6 0.17 155);
+  --chart-5: oklch(0.55 0.12 290);
+
+  /* Sidebar */
+  --sidebar: oklch(0.32 0.056 182); /* deep teal */
+  --sidebar-foreground: oklch(0.97 0.01 175);
+  --sidebar-primary: oklch(0.79 0.16 75);
+  --sidebar-primary-foreground: oklch(0.21 0.02 240);
+  --sidebar-accent: oklch(0.27 0.05 182);
+  --sidebar-accent-foreground: oklch(0.97 0.01 175);
+  --sidebar-border: oklch(0.27 0.05 182);
+  --sidebar-ring: oklch(0.79 0.16 75);
+
+  /* Elevation tokens */
+  --shadow-card:
+    0 1px 2px -1px oklch(0.3 0.04 245 / 0.1), 0 2px 6px -2px oklch(0.3 0.04 245 / 0.08);
+  --shadow-raised:
+    0 4px 12px -3px oklch(0.3 0.04 245 / 0.14), 0 2px 5px -2px oklch(0.3 0.04 245 / 0.08);
+}
+
+.dark {
+  /* Placeholders only; light is canonical for v1. */
+  --background: oklch(0.18 0.02 175);
+  --surface: oklch(0.22 0.02 175);
+  --foreground: oklch(0.97 0.01 175);
+  --card: oklch(0.22 0.02 175);
+  --card-foreground: oklch(0.97 0.01 175);
+  --popover: oklch(0.22 0.02 175);
+  --popover-foreground: oklch(0.97 0.01 175);
+  --primary: oklch(0.72 0.1 175);
+  --primary-foreground: oklch(0.15 0.02 175);
+  --primary-dark: oklch(0.55 0.08 175);
+  --secondary: oklch(0.28 0.02 175);
+  --secondary-foreground: oklch(0.97 0.01 175);
+  --muted: oklch(0.28 0.02 175);
+  --muted-foreground: oklch(0.72 0.01 175);
+  --accent: oklch(0.79 0.16 75);
+  --accent-foreground: oklch(0.15 0.02 175);
+  --destructive: oklch(0.62 0.22 27);
+  --destructive-foreground: oklch(0.97 0.01 175);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.72 0.1 175);
+  --sidebar: oklch(0.22 0.02 175);
+  --sidebar-foreground: oklch(0.97 0.01 175);
+  --sidebar-primary: oklch(0.79 0.16 75);
+  --sidebar-primary-foreground: oklch(0.15 0.02 175);
+  --sidebar-accent: oklch(0.28 0.02 175);
+  --sidebar-accent-foreground: oklch(0.97 0.01 175);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.79 0.16 75);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html,
+  body {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Sleek modern scrollbars across tables and containers */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 9999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-muted-foreground);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    letter-spacing: -0.01em;
+  }
+
+  /* Elevation: give full-border surface/card panels a soft shadow so they read as
+     raised cards against the deeper canvas instead of flat, washed-out boxes.
+     Uses the all-sides `border` utility, so partial borders (top bar `border-b`,
+     footer `border-t`) are intentionally excluded. */
+  .bg-surface.border,
+  .bg-card.border {
+    box-shadow: var(--shadow-card);
+  }
+
+  /* Give the top bar a hairline drop shadow for separation from the content. */
+  header.bg-surface {
+    box-shadow:
+      0 1px 0 0 var(--color-border),
+      0 2px 8px -6px oklch(0.3 0.04 245 / 0.25);
+  }
+}
+
+/* Print stylesheet — committee memo export */
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  body,
+  main {
+    background: white !important;
+    color: black !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  aside,
+  header,
+  nav,
+  button:not(.allow-print),
+  .no-print,
+  [data-no-print="true"],
+  footer {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  .print-page {
+    box-shadow: none !important;
+    border: 1px solid #e2e8f0 !important;
+    background: white !important;
+    color: black !important;
+    padding: 1.25rem !important;
+    page-break-inside: avoid;
+  }
+
+  .print-break {
+    page-break-after: always;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+}
+
+.print-only {
+  display: none;
+}
+
+/* View Transitions API (Modern Web Guidance) */
+@view-transition {
+  navigation: auto;
+}
+
+::view-transition-old(root) {
+  animation: 160ms cubic-bezier(0.4, 0, 1, 1) both vt-fade-out;
+}
+
+::view-transition-new(root) {
+  animation: 160ms cubic-bezier(0, 0, 0.2, 1) both vt-fade-in;
+}
+
+@keyframes vt-fade-out {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.995); }
+}
+
+@keyframes vt-fade-in {
+  from { opacity: 0; transform: scale(0.995); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}
+
+/* Modern Accessible Form Validation (Modern Web Guidance :user-valid and :user-invalid) */
+input:user-invalid,
+select:user-invalid,
+textarea:user-invalid {
+  border-color: #ef4444 !important;
+  box-shadow: 0 0 0 1px #ef4444 !important;
+}
+
+input:user-valid:focus,
+select:user-valid:focus,
+textarea:user-valid:focus {
+  border-color: #10b981 !important;
+  box-shadow: 0 0 0 1px #10b981 !important;
+}

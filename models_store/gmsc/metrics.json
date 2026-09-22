@@ -1,0 +1,157 @@
+{
+  "overall": {
+    "logistic_baseline": {
+      "roc_auc": 0.8536,
+      "gini": 0.7072,
+      "ks": 0.5599,
+      "pr_auc": 0.3466,
+      "capture_top_decile": 0.5392,
+      "capture_top_5pct": 0.3491,
+      "lift_top_decile": 5.3923,
+      "brier": 0.1439,
+      "default_rate": 0.0668,
+      "n": 22500.0
+    },
+    "lightgbm_raw": {
+      "roc_auc": 0.8569,
+      "gini": 0.7138,
+      "ks": 0.5642,
+      "pr_auc": 0.391,
+      "capture_top_decile": 0.5379,
+      "capture_top_5pct": 0.3484,
+      "lift_top_decile": 5.379,
+      "brier": 0.0583,
+      "default_rate": 0.0668,
+      "n": 22500.0
+    },
+    "lightgbm_calibrated": {
+      "roc_auc": 0.8566,
+      "gini": 0.7131,
+      "ks": 0.5567,
+      "pr_auc": 0.3737,
+      "capture_top_decile": 0.5366,
+      "capture_top_5pct": 0.3457,
+      "lift_top_decile": 5.3657,
+      "brier": 0.0498,
+      "default_rate": 0.0668,
+      "n": 22500.0
+    },
+    "blend_raw": {
+      "roc_auc": 0.8621,
+      "gini": 0.7243,
+      "ks": 0.5735,
+      "pr_auc": 0.4038,
+      "capture_top_decile": 0.5485,
+      "capture_top_5pct": 0.3624,
+      "lift_top_decile": 5.4854,
+      "brier": 0.1019,
+      "default_rate": 0.0668,
+      "n": 22500
+    },
+    "blend_calibrated": {
+      "roc_auc": 0.8621,
+      "gini": 0.7242,
+      "ks": 0.573,
+      "pr_auc": 0.3897,
+      "capture_top_decile": 0.5492,
+      "capture_top_5pct": 0.361,
+      "lift_top_decile": 5.492,
+      "brier": 0.0489,
+      "default_rate": 0.0668,
+      "n": 22500
+    }
+  },
+  "by_sector": {
+    "30-45": {
+      "roc_auc": 0.8365,
+      "gini": 0.6731,
+      "ks": 0.5424,
+      "pr_auc": 0.4364,
+      "capture_top_decile": 0.4865,
+      "capture_top_5pct": 0.3007,
+      "lift_top_decile": 4.8609,
+      "brier": 0.068,
+      "default_rate": 0.0976,
+      "n": 6065.0
+    },
+    "45-60": {
+      "roc_auc": 0.8613,
+      "gini": 0.7226,
+      "ks": 0.572,
+      "pr_auc": 0.3891,
+      "capture_top_decile": 0.5616,
+      "capture_top_5pct": 0.3545,
+      "lift_top_decile": 5.6143,
+      "brier": 0.0485,
+      "default_rate": 0.0663,
+      "n": 8088.0
+    },
+    "60+": {
+      "roc_auc": 0.8505,
+      "gini": 0.7011,
+      "ks": 0.5702,
+      "pr_auc": 0.2452,
+      "capture_top_decile": 0.5859,
+      "capture_top_5pct": 0.4293,
+      "lift_top_decile": 5.8526,
+      "brier": 0.0245,
+      "default_rate": 0.0291,
+      "n": 6793.0
+    },
+    "<30": {
+      "roc_auc": 0.8244,
+      "gini": 0.6489,
+      "ks": 0.5036,
+      "pr_auc": 0.3954,
+      "capture_top_decile": 0.4045,
+      "capture_top_5pct": 0.2303,
+      "lift_top_decile": 4.0268,
+      "brier": 0.0833,
+      "default_rate": 0.1146,
+      "n": 1553.0
+    }
+  },
+  "meta": {
+    "seed": 42,
+    "n_trials": 60,
+    "best_params": {
+      "num_leaves": 123,
+      "learning_rate": 0.011017415521458889,
+      "min_child_samples": 58,
+      "subsample": 0.8861842317273896,
+      "colsample_bytree": 0.61745479363817,
+      "reg_alpha": 0.03199445468919847,
+      "reg_lambda": 0.02008602707549892
+    },
+    "segment": "retail_gmsc",
+    "split": "stratified random 70/15/15",
+    "monotone_constraints": {
+      "revolving_utilization": 1,
+      "debt_ratio": 1,
+      "dpd_30_59": 1,
+      "dpd_60_89": 1,
+      "times_90_late": 1,
+      "total_past_due": 1,
+      "worst_dpd": 1,
+      "monthly_income": -1,
+      "income_per_dependent": -1
+    },
+    "psi_train_vs_test": {
+      "revolving_utilization": 0.0006,
+      "age": 0.0005,
+      "debt_ratio": 0.0004,
+      "monthly_income": 0.0005,
+      "open_credit_lines": 0.0007,
+      "real_estate_loans": 0.0,
+      "dependents": 0.0,
+      "dpd_30_59": 0.0,
+      "dpd_60_89": 0.0,
+      "times_90_late": 0.0,
+      "total_past_due": 0.0,
+      "worst_dpd": 0.0,
+      "income_per_dependent": 0.0009,
+      "exposure_proxy": 0.0005
+    },
+    "blend_weight": 0.25
+  }
+}

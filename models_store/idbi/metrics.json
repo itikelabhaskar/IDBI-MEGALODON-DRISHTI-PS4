@@ -1,0 +1,134 @@
+{
+  "overall": {
+    "lightgbm_raw": {
+      "roc_auc": 0.8676,
+      "gini": 0.7352,
+      "ks": 0.6462,
+      "pr_auc": 0.6678,
+      "capture_top_decile": 0.5714,
+      "capture_top_5pct": 0.3247,
+      "lift_top_decile": 5.7143,
+      "brier": 0.0977,
+      "default_rate": 0.1283,
+      "n": 600.0
+    },
+    "lightgbm_calibrated": {
+      "roc_auc": 0.8676,
+      "gini": 0.7352,
+      "ks": 0.6462,
+      "pr_auc": 0.6678,
+      "capture_top_decile": 0.5714,
+      "capture_top_5pct": 0.3247,
+      "lift_top_decile": 5.7143,
+      "brier": 0.068,
+      "default_rate": 0.1283,
+      "n": 600.0
+    }
+  },
+  "by_sector": {
+    "medium": {
+      "roc_auc": 0.9868,
+      "gini": 0.9735,
+      "ks": 0.9074,
+      "pr_auc": 0.9405,
+      "capture_top_decile": 0.8571,
+      "capture_top_5pct": 0.5714,
+      "lift_top_decile": 7.4694,
+      "brier": 0.0383,
+      "default_rate": 0.1148,
+      "n": 61.0
+    },
+    "micro": {
+      "roc_auc": 0.8646,
+      "gini": 0.7291,
+      "ks": 0.6402,
+      "pr_auc": 0.6772,
+      "capture_top_decile": 0.5952,
+      "capture_top_5pct": 0.3571,
+      "lift_top_decile": 5.9163,
+      "brier": 0.067,
+      "default_rate": 0.128,
+      "n": 328.0
+    },
+    "small": {
+      "roc_auc": 0.8482,
+      "gini": 0.6963,
+      "ks": 0.6079,
+      "pr_auc": 0.6464,
+      "capture_top_decile": 0.5,
+      "capture_top_5pct": 0.3571,
+      "lift_top_decile": 4.7955,
+      "brier": 0.078,
+      "default_rate": 0.1327,
+      "n": 211.0
+    }
+  },
+  "meta": {
+    "seed": 42,
+    "n_trials": 10,
+    "best_params": {
+      "num_leaves": 107,
+      "learning_rate": 0.02490643969382439,
+      "min_child_samples": 47,
+      "subsample": 0.8736932106048627,
+      "colsample_bytree": 0.7760609974958405,
+      "reg_alpha": 1.254134495897175e-07,
+      "reg_lambda": 0.00028614897264046574
+    },
+    "monotone_constraints": {
+      "gst_filing_delay_days": 1,
+      "gst_turnover_trend_pct": -1,
+      "itc_mismatch_flag": 1,
+      "emi_bounce_6m": 1,
+      "cashflow_volatility": 1,
+      "balance_trend_pct": -1,
+      "current_ratio": -1,
+      "cmr": 1,
+      "enquiries_6m": 1,
+      "interest_spread_bps": 1,
+      "note_payment_promise_broken": 1,
+      "note_business_disruption": 1,
+      "note_stock_statement_delay": 1,
+      "note_dispute_litigation": 1,
+      "note_positive_outlook": -1,
+      "note_sentiment": -1,
+      "nbr_stress_score": 1,
+      "nbr_bounce_share": 1,
+      "electricity_consumption_trend_pct": -1,
+      "upi_inflow_stability": -1
+    },
+    "calibration_method": "beta",
+    "ind_as_109_stages": {
+      "1": 403,
+      "2": 133,
+      "3": 64
+    },
+    "psi_train_vs_test": {
+      "ticket_size": 0.0182,
+      "tenure_months": 0.0,
+      "vintage_months": 0.0233,
+      "cmr": 0.0098,
+      "enquiries_6m": NaN,
+      "interest_spread_bps": NaN,
+      "gst_filing_delay_days": NaN,
+      "gst_turnover_trend_pct": NaN,
+      "itc_mismatch_flag": NaN,
+      "emi_bounce_6m": 0.0002,
+      "cashflow_volatility": 0.0044,
+      "balance_trend_pct": 0.0069,
+      "credit_turnover_ratio": NaN,
+      "current_ratio": NaN,
+      "electricity_consumption_trend_pct": NaN,
+      "upi_inflow_stability": NaN,
+      "note_payment_promise_broken": NaN,
+      "note_business_disruption": NaN,
+      "note_stock_statement_delay": NaN,
+      "note_dispute_litigation": NaN,
+      "note_positive_outlook": NaN,
+      "note_sentiment": NaN,
+      "nbr_stress_score": NaN,
+      "nbr_bounce_share": NaN
+    },
+    "data_note": "IDBI Finacle Sandbox synthetic canonical dataset embodying APIs 402 (overdue/dpd), 404 (demanded vs collected), 441 (DP erosion), 362 (liens), 391 (restructuring), and 408 (CIBIL bureau)."
+  }
+}

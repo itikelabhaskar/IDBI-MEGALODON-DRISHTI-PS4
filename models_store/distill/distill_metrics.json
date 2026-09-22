@@ -1,0 +1,20 @@
+{
+  "results": {
+    "lgbm_direct_1k": 0.8618,
+    "tabpfn_teacher": 0.9087,
+    "lgbm_student_distilled": 0.9048,
+    "lgbm_stack_teacher_feature": 0.8607,
+    "latency_ms_per_row": {
+      "tabpfn_teacher": 22.675,
+      "lgbm_student": 0.0113,
+      "speedup_x": 2006.4
+    }
+  },
+  "meta": {
+    "n_labeled": 1000,
+    "n_transfer": 8000,
+    "test": 3000,
+    "seed": 42,
+    "note": "transfer-pool labels never used; student learns the teacher's function, not the data's labels"
+  }
+}

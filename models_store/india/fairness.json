@@ -1,0 +1,240 @@
+{
+  "segment": "msme_india",
+  "headline_attribute": "sub_segment",
+  "disparate_impact_ratio": 0.8635,
+  "passes_80pct_rule": true,
+  "worst_attribute": "state",
+  "worst_disparate_impact_ratio": 0.6088,
+  "all_attributes_pass": false,
+  "failing_attributes": [
+    "sector",
+    "state"
+  ],
+  "audits": {
+    "sub_segment": {
+      "attribute": "sub_segment",
+      "flag_threshold": 0.16,
+      "per_group": [
+        {
+          "group": "micro",
+          "n": 7550,
+          "flag_rate": 0.0381,
+          "mean_pd": 0.0395,
+          "auc": 0.8539,
+          "default_rate": 0.0452
+        },
+        {
+          "group": "small",
+          "n": 3806,
+          "flag_rate": 0.0378,
+          "mean_pd": 0.038,
+          "auc": 0.8875,
+          "default_rate": 0.0323
+        },
+        {
+          "group": "medium",
+          "n": 1215,
+          "flag_rate": 0.0329,
+          "mean_pd": 0.0348,
+          "auc": 0.8607,
+          "default_rate": 0.0206
+        }
+      ],
+      "disparate_impact_ratio": 0.8635,
+      "passes_80pct_rule": true
+    },
+    "sector": {
+      "attribute": "sector",
+      "flag_threshold": 0.16,
+      "per_group": [
+        {
+          "group": "it_services",
+          "n": 1229,
+          "flag_rate": 0.0415,
+          "mean_pd": 0.0392,
+          "auc": 0.879,
+          "default_rate": 0.0293
+        },
+        {
+          "group": "hospitality",
+          "n": 1257,
+          "flag_rate": 0.0414,
+          "mean_pd": 0.0393,
+          "auc": 0.7976,
+          "default_rate": 0.0461
+        },
+        {
+          "group": "food_processing",
+          "n": 1221,
+          "flag_rate": 0.041,
+          "mean_pd": 0.0408,
+          "auc": 0.9035,
+          "default_rate": 0.0401
+        },
+        {
+          "group": "agri_processing",
+          "n": 1289,
+          "flag_rate": 0.0396,
+          "mean_pd": 0.0407,
+          "auc": 0.8643,
+          "default_rate": 0.0396
+        },
+        {
+          "group": "textiles",
+          "n": 1253,
+          "flag_rate": 0.0375,
+          "mean_pd": 0.0391,
+          "auc": 0.84,
+          "default_rate": 0.0415
+        },
+        {
+          "group": "retail_trade",
+          "n": 1256,
+          "flag_rate": 0.0374,
+          "mean_pd": 0.0387,
+          "auc": 0.863,
+          "default_rate": 0.0414
+        },
+        {
+          "group": "construction",
+          "n": 1211,
+          "flag_rate": 0.0372,
+          "mean_pd": 0.0383,
+          "auc": 0.9118,
+          "default_rate": 0.0553
+        },
+        {
+          "group": "transport",
+          "n": 1294,
+          "flag_rate": 0.0371,
+          "mean_pd": 0.0374,
+          "auc": 0.8723,
+          "default_rate": 0.0325
+        },
+        {
+          "group": "pharma",
+          "n": 1258,
+          "flag_rate": 0.035,
+          "mean_pd": 0.0382,
+          "auc": 0.8179,
+          "default_rate": 0.0334
+        },
+        {
+          "group": "auto_components",
+          "n": 1303,
+          "flag_rate": 0.0284,
+          "mean_pd": 0.0344,
+          "auc": 0.8794,
+          "default_rate": 0.0307
+        }
+      ],
+      "disparate_impact_ratio": 0.6843,
+      "passes_80pct_rule": false
+    },
+    "state": {
+      "attribute": "state",
+      "flag_threshold": 0.16,
+      "per_group": [
+        {
+          "group": "DL",
+          "n": 1067,
+          "flag_rate": 0.0478,
+          "mean_pd": 0.042,
+          "auc": 0.844,
+          "default_rate": 0.0412
+        },
+        {
+          "group": "WB",
+          "n": 1100,
+          "flag_rate": 0.04,
+          "mean_pd": 0.0424,
+          "auc": 0.8797,
+          "default_rate": 0.05
+        },
+        {
+          "group": "KL",
+          "n": 1071,
+          "flag_rate": 0.0392,
+          "mean_pd": 0.0393,
+          "auc": 0.8615,
+          "default_rate": 0.0373
+        },
+        {
+          "group": "TN",
+          "n": 1029,
+          "flag_rate": 0.0389,
+          "mean_pd": 0.0387,
+          "auc": 0.8724,
+          "default_rate": 0.0408
+        },
+        {
+          "group": "KA",
+          "n": 1053,
+          "flag_rate": 0.038,
+          "mean_pd": 0.0376,
+          "auc": 0.831,
+          "default_rate": 0.038
+        },
+        {
+          "group": "PB",
+          "n": 1060,
+          "flag_rate": 0.0377,
+          "mean_pd": 0.0375,
+          "auc": 0.8372,
+          "default_rate": 0.0377
+        },
+        {
+          "group": "TG",
+          "n": 990,
+          "flag_rate": 0.0374,
+          "mean_pd": 0.0372,
+          "auc": 0.8496,
+          "default_rate": 0.0354
+        },
+        {
+          "group": "UP",
+          "n": 1049,
+          "flag_rate": 0.0372,
+          "mean_pd": 0.0387,
+          "auc": 0.8248,
+          "default_rate": 0.0391
+        },
+        {
+          "group": "MH",
+          "n": 1021,
+          "flag_rate": 0.0362,
+          "mean_pd": 0.0387,
+          "auc": 0.9147,
+          "default_rate": 0.0343
+        },
+        {
+          "group": "GJ",
+          "n": 1072,
+          "flag_rate": 0.0345,
+          "mean_pd": 0.0388,
+          "auc": 0.8923,
+          "default_rate": 0.0373
+        },
+        {
+          "group": "MP",
+          "n": 1029,
+          "flag_rate": 0.034,
+          "mean_pd": 0.0377,
+          "auc": 0.8798,
+          "default_rate": 0.0447
+        },
+        {
+          "group": "RJ",
+          "n": 1030,
+          "flag_rate": 0.0291,
+          "mean_pd": 0.0338,
+          "auc": 0.862,
+          "default_rate": 0.0301
+        }
+      ],
+      "disparate_impact_ratio": 0.6088,
+      "passes_80pct_rule": false
+    }
+  },
+  "note": "Disparate impact ratio is min/max selection rate across groups; the 80% rule treats >=0.80 as passing. These are the attributes carried on the canonical frame, not legally protected characteristics, which the bank holds and we do not. Branch and region are excluded from the model by a regression test and appear here only as routing metadata."
+}
