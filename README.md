@@ -9,6 +9,17 @@ watch bucket, a prescribed action with an owner, and an expected loss in rupees.
 Built for **IDBI Innovate 2026, Problem Statement 4** (MSME credit · predictive AI ·
 risk management).
 
+## Live demo
+
+**[Open the controlling-office console →](https://huggingface.co/spaces/nightbloodredux/drishti-idbi-ps4)**
+
+No setup required. The console runs against a precomputed snapshot of the held-out India
+MSME cohort, so every page works without the scoring API up: the portfolio watchlist,
+branch rollup, scenario lab, supplier contagion and the governance receipts.
+
+To run the whole thing locally instead, including the live scoring API and its Swagger
+documentation, see [Setup](#setup) and [Serving](#serving) below.
+
 ---
 
 ## The problem
