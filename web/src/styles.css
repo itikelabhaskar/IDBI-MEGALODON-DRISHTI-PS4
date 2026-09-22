@@ -167,6 +167,13 @@
   html,
   body {
     max-width: 100%;
+  }
+
+  /* Horizontal overflow is clipped on the root only. Putting overflow-x on <body>
+     makes its computed overflow-y "auto", which turns body into a scroll container
+     and silently breaks `position: sticky` for every descendant — the sidebar then
+     scrolls away and leaves a gap beside the page. */
+  html {
     overflow-x: hidden;
   }
 
