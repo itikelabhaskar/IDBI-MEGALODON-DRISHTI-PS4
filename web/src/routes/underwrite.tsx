@@ -200,6 +200,10 @@ export function UnderwritePage() {
   // Results & submission state
   const [isScoring, setIsScoring] = useState(false);
   const [result, setResult] = useState<AppraisalResult | null>(null);
+  // A verdict produced without the scoring API has to say so on the face of the
+  // screen — an unlabelled approximation in a credit decision is worse than none.
+  const [scoredOffline, setScoredOffline] = useState(false);
+  const [scoreError, setScoreError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [decisionType, setDecisionType] = useState<"accept" | "override" | "defer" | "reject">("accept");
   const [revisedGrade, setRevisedGrade] = useState("RG3");
@@ -291,6 +295,14 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
 
     const res = await scoreRawBorrower(seg, payload);
     setIsScoring(false);
+    if (!res || res.pd_12m == null) {
+      setScoreError(
+        "Could not produce a verdict for these inputs. Check the facility parameters and run the appraisal again.",
+      );
+      return;
+    }
+    setScoreError(null);
+    setScoredOffline(res.status === "fallback");
     if (res && res.pd_12m != null) {
       setResult({
         pd_12m: res.pd_12m,
@@ -1269,6 +1281,25 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
 
           {/* Output Column (5 cols) */}
           <div className="space-y-4 lg:col-span-5" ref={recommendationRef}>
+            {scoreError && (
+              <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+                {scoreError}
+              </div>
+            )}
+            {scoredOffline && (
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs">
+                <span className="font-medium text-amber-700 dark:text-amber-400">
+                  Offline reference model
+                </span>
+                <span className="text-muted-foreground">
+                  {" "}— the live scoring service is not reachable from this deployment, so the
+                  probability below is an approximation, not the trained model&apos;s output. The
+                  risk grade, SMA watch bucket, early-warning rules and Ind AS 109 provision are
+                  computed from it using the production thresholds. Run this appraisal against the
+                  Bank&apos;s sandbox deployment for a model-grade verdict.
+                </span>
+              </div>
+            )}
             {result ? (
               <>
                 {/* Plain-English Recommendation Banner */}

@@ -14,6 +14,7 @@ import type {
   ContagionSimulateResponse,
 } from "../types";
 import snapshotJson from "../data/portfolio-snapshot.json";
+import { offlineScore, type OfflineScoreInput } from "./offline-score";
 
 /**
  * Data facade for the console.
@@ -436,6 +437,11 @@ export async function fetchDecisions(loanId: string): Promise<DecisionRecord[]> 
 
 /**
  * Direct single-borrower underwriting scoring via FastAPI.
+ *
+ * Falls back to the offline reference scorer when `/api` is unreachable — the
+ * static Hugging Face export has no backend, and before this the appraisal
+ * screen silently showed nothing at all there. The fallback result carries
+ * `status: "fallback"` so the caller can label the verdict as approximate.
  */
 export async function scoreRawBorrower(
   segment: string,
@@ -449,10 +455,13 @@ export async function scoreRawBorrower(
       body: JSON.stringify(payload),
       signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return (await res.json()) as ScoreResponse;
   } catch {
-    return null;
+    // A caller-initiated abort is not an API outage — let it stay unanswered
+    // rather than replacing a superseded request with an offline verdict.
+    if (signal?.aborted) return null;
+    return offlineScore(segment, payload as OfflineScoreInput) as ScoreResponse;
   }
 }
 

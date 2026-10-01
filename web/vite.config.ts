@@ -102,7 +102,19 @@ export default defineConfig({
     htmlAcceptNormalizePlugin(),
     apiProxyPlugin(),
     tailwindcss(),
-    tanstackStart({ server: { entry: "server" } }),
+    tanstackStart({
+      server: { entry: "server" },
+      // Opt-in prerender for static hosting: every route gets a real HTML entry
+      // point, so a deep link resolves without a server-side fallback.
+      ...(process.env.DRISHTI_STATIC_BUILD === "true" || process.env.PRERENDER === "true"
+        ? {
+            prerender: {
+              enabled: true,
+              crawlLinks: true,
+            },
+          }
+        : {}),
+    }),
     nitro({
       preset: process.env.NITRO_PRESET || "node-server",
       noExternals: true,
