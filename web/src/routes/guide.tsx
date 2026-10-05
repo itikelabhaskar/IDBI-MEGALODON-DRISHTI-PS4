@@ -40,19 +40,9 @@ export function OperationsGuidePage() {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border/60 pb-5">
         <div>
-          <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-muted-foreground">
-            <BookOpen className="h-3.5 w-3.5 text-primary" />
-            <span>IDBI DRISHTI Standard Operating Manual</span>
-            <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-primary/40 text-primary">
-              v2.4 Production
-            </Badge>
-          </div>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight text-foreground">
+          <h1 className="text-xl font-bold tracking-tight text-foreground">
             Operations & Usage Guide
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Daily banking SOPs, Core Banking Finacle / Account Aggregator data lifecycle, RG1–RG10 rating scale, and RBI early warning playbooks.
-          </p>
         </div>
 
         <div className="flex items-center gap-2">
@@ -182,7 +172,7 @@ export function OperationsGuidePage() {
                       Branch Network Review
                     </div>
                     <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      Open <Link to="/branches" className="text-primary underline">Branch Network</Link>. Sort 45 branches by exposure-weighted PD. Deploy special recovery task force to top 5 stressed branches (e.g., Surat Textiles, Bhiwandi).
+                      Open <Link to="/branches" className="text-primary underline">Branch Explorer</Link>. Sort 45 branches by exposure-weighted PD. Deploy special recovery task force to top 5 stressed branches (e.g., Surat Textiles, Bhiwandi).
                     </p>
                   </div>
 
@@ -192,7 +182,7 @@ export function OperationsGuidePage() {
                       Macro Scenario Stressing
                     </div>
                     <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      Use <Link to="/scenario" className="text-primary underline">Scenario Lab</Link> to simulate RBI rate hikes (+150 bps repo) or commodity shocks. Evaluate impact on total portfolio ECL and capital adequacy ratio.
+                      Use <Link to="/market" search={{ tab: "scenario" }} className="text-primary underline">Market Explorer → Scenario stress</Link> to simulate RBI rate hikes (+150 bps repo) or commodity shocks. Evaluate impact on total portfolio ECL and capital adequacy ratio.
                     </p>
                   </div>
 
@@ -202,7 +192,7 @@ export function OperationsGuidePage() {
                       Supplier Contagion Tracing
                     </div>
                     <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      Use <Link to="/contagion" className="text-primary underline">Supplier Contagion</Link> to trace Tier-1 & Tier-2 automotive/textile supply chains. Ring-fence vulnerable suppliers before anchor buyer distress cascades.
+                      Use <Link to="/market" search={{ tab: "contagion" }} className="text-primary underline">Market Explorer → Supplier contagion</Link> to trace Tier-1 & Tier-2 automotive/textile supply chains. Ring-fence vulnerable suppliers before anchor buyer distress cascades.
                     </p>
                   </div>
                 </div>
@@ -274,24 +264,24 @@ export function OperationsGuidePage() {
                 <div className="rounded-md border border-border/60 p-3 bg-card/60 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-foreground">1. IDBI Finacle Core Banking Sandbox</span>
-                    <Badge variant="outline" className="text-[9px] px-1 py-0 border-blue-500/30 text-blue-600 font-normal">
-                      6 REST APIs
-                    </Badge>
+                    <Link to="/architecture" hash="api-matrix" className="text-[11px] text-primary hover:underline font-mono">
+                      View API Lineage Matrix →
+                    </Link>
                   </div>
                   <ul className="text-[11px] text-muted-foreground space-y-1">
-                    <li><strong className="text-foreground">API 402:</strong> Facility limits, drawing power, ledger balance, branch placement.</li>
-                    <li><strong className="text-foreground">API 404:</strong> 12M transaction velocity, demand collection ratio, credit summation.</li>
-                    <li><strong className="text-foreground">API 391:</strong> Drawing power calculation, paid stock valuation, DP gap percentage.</li>
-                    <li><strong className="text-foreground">API 441:</strong> Repayment track, overdue days (DPD), 6M EMI/NACH bounce count.</li>
-                    <li><strong className="text-foreground">API 362:</strong> Collateral registry, statutory lien notices, restructuring flags.</li>
-                    <li><strong className="text-foreground">API 408:</strong> KYC profile, PAN, entity constitution, Udyam MSME classification.</li>
+                    <li><strong className="text-foreground">Loan overdue details (CBS-01):</strong> Days Past Due (DPD), overdue amount, NPA status code (T0 performing cohort pruning &amp; 12M default target).</li>
+                    <li><strong className="text-foreground">Overdue position (CBS-02):</strong> Trailing demanded vs collected ratio, interest &amp; principal overdue (EWS19 collection shortfall).</li>
+                    <li><strong className="text-foreground">Loan limits and drawing power (CBS-03):</strong> Approved sanction limit vs assessed drawing power from stock registers, DP erosion gap % (EWS18).</li>
+                    <li><strong className="text-foreground">Loan account profile (CBS-04):</strong> Sanction terms, tenor, sector, branch code, and restructuring history flag.</li>
+                    <li><strong className="text-foreground">Account liens (CBS-05):</strong> Encumbrances, statutory tax demands, court orders, and frozen balances (Lien EWS).</li>
+                    <li><strong className="text-foreground">Account statement (ESB-01):</strong> 6M inward cheque returns, NACH mandate bounces, cashflow velocity.</li>
                   </ul>
                 </div>
 
                 <div className="rounded-md border border-border/60 p-3 bg-card/60 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-foreground">2. Sahamati Account Aggregator (AA)</span>
-                    <Badge variant="outline" className="text-[9px] px-1 py-0 border-emerald-500/30 text-emerald-600 font-normal">
+                    <Badge variant="outline" className="text-[11px] px-1 py-0 border-emerald-500/30 text-emerald-600 font-normal">
                       APIs 590–595
                     </Badge>
                   </div>
@@ -303,7 +293,7 @@ export function OperationsGuidePage() {
                 <div className="rounded-md border border-border/60 p-3 bg-card/60 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-foreground">3. Bureau & GSTN Regulatory Interfaces</span>
-                    <Badge variant="outline" className="text-[9px] px-1 py-0 border-amber-500/30 text-amber-600 font-normal">
+                    <Badge variant="outline" className="text-[11px] px-1 py-0 border-amber-500/30 text-amber-600 font-normal">
                       External Bureau
                     </Badge>
                   </div>
@@ -329,7 +319,7 @@ export function OperationsGuidePage() {
                 <div className="rounded-md border border-border/60 p-3 bg-card/60 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-foreground">1. Calibrated 12-Month PD & Risk Grade</span>
-                    <Badge variant="outline" className="text-[9px] px-1 py-0 border-emerald-500/30 text-emerald-600 font-normal">
+                    <Badge variant="outline" className="text-[11px] px-1 py-0 border-emerald-500/30 text-emerald-600 font-normal">
                       RG1–RG10
                     </Badge>
                   </div>
@@ -341,7 +331,7 @@ export function OperationsGuidePage() {
                 <div className="rounded-md border border-border/60 p-3 bg-card/60 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-foreground">2. Ind AS 109 3-Stage Expected Credit Loss (ECL)</span>
-                    <Badge variant="outline" className="text-[9px] px-1 py-0 border-blue-500/30 text-blue-600 font-normal">
+                    <Badge variant="outline" className="text-[11px] px-1 py-0 border-blue-500/30 text-blue-600 font-normal">
                       Stage 1 · 2 · 3
                     </Badge>
                   </div>
@@ -353,7 +343,7 @@ export function OperationsGuidePage() {
                 <div className="rounded-md border border-border/60 p-3 bg-card/60 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-foreground">3. 19 RBI Early Warning Signals & Recourse Playbook</span>
-                    <Badge variant="outline" className="text-[9px] px-1 py-0 border-purple-500/30 text-purple-600 font-normal">
+                    <Badge variant="outline" className="text-[11px] px-1 py-0 border-purple-500/30 text-purple-600 font-normal">
                       Actionable Recourse
                     </Badge>
                   </div>
@@ -365,7 +355,7 @@ export function OperationsGuidePage() {
                 <div className="rounded-md border border-border/60 p-3 bg-card/60 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-foreground">4. Formal Credit Appraisal Memo (CAM Dossier)</span>
-                    <Badge variant="outline" className="text-[9px] px-1 py-0 border-primary/30 text-primary font-normal">
+                    <Badge variant="outline" className="text-[11px] px-1 py-0 border-primary/30 text-primary font-normal">
                       Print & PDF Ready
                     </Badge>
                   </div>
@@ -428,7 +418,7 @@ export function OperationsGuidePage() {
             <CardHeader className="pb-3">
               <CardTitle className="text-base">IDBI DRISHTI Master Rating Scale (RG1 to RG10)</CardTitle>
               <CardDescription className="text-xs">
-                Calibrated 12-month Probability of Default (PD) bands, RAG categorization, Ind AS 109 staging, and governance review cadence.
+                The same table the engine uses (src/framework/interpretation.py): PD bands, RAG, indicative ECL staging, review cadence and owner. Days past due can raise the stage and watch bucket above what the grade gives; it never lowers them.
               </CardDescription>
             </CardHeader>
             <CardContent className="p-0">
@@ -440,24 +430,24 @@ export function OperationsGuidePage() {
                       <TableHead className="text-xs">12M Calibrated PD</TableHead>
                       <TableHead className="text-xs">RAG Status</TableHead>
                       <TableHead className="text-xs">Ind AS 109 Stage</TableHead>
-                      <TableHead className="text-xs">ECL Floor</TableHead>
+                      <TableHead className="text-xs">ECL basis</TableHead>
                       <TableHead className="text-xs">Review Cadence</TableHead>
-                      <TableHead className="text-xs">Delegated Authority</TableHead>
+                      <TableHead className="text-xs">Owner</TableHead>
                       <TableHead className="text-xs">Operational Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {[
-                      { grade: "RG1", pd: "0.00% – 0.50%", rag: "Green", stage: "Stage 1", floor: "0.25%", cadence: "Annual", auth: "Branch Manager", action: "Fast-track renewal; eligible for limit enhancement" },
-                      { grade: "RG2", pd: "0.50% – 1.00%", rag: "Green", stage: "Stage 1", floor: "0.40%", cadence: "Annual", auth: "Branch Manager", action: "Standard annual renewal; verify quarterly stock statement" },
-                      { grade: "RG3", pd: "1.00% – 2.00%", rag: "Green", stage: "Stage 1", floor: "0.75%", cadence: "Annual", auth: "Assistant General Manager", action: "Standard monitoring; check annual financials" },
-                      { grade: "RG4", pd: "2.00% – 4.00%", rag: "Amber", stage: "Stage 1", floor: "1.25%", cadence: "Semi-Annual", auth: "Deputy General Manager", action: "Satisfactory with minor alerts; semi-annual covenant audit" },
-                      { grade: "RG5", pd: "4.00% – 7.00%", rag: "Amber", stage: "Stage 2 (SICR)", floor: "3.50%", cadence: "Quarterly", auth: "Zonal Committee", action: "Watchlist flag; demand 10% margin enhancement" },
-                      { grade: "RG6", pd: "7.00% – 11.00%", rag: "Amber", stage: "Stage 2 (SICR)", floor: "7.00%", cadence: "Quarterly", auth: "Zonal Committee", action: "Incipient stress; monthly drawing power verification" },
-                      { grade: "RG7", pd: "11.00% – 16.00%", rag: "Red", stage: "Stage 2 (SICR)", floor: "12.50%", cadence: "Monthly", auth: "Executive Committee", action: "High default risk; cap facility limit, issue 30-day cure notice" },
-                      { grade: "RG8", pd: "16.00% – 22.00%", rag: "Red", stage: "Stage 2 (SICR)", floor: "20.00%", cadence: "Monthly", auth: "Executive Committee", action: "Severe stress; demand full collateral pledge; restrict drawdowns" },
-                      { grade: "RG9", pd: "22.00% – 30.00%", rag: "Red", stage: "Stage 3 (Credit Impaired)", floor: "40.00%", cadence: "Fortnightly", auth: "Board Credit Committee", action: "Impaired asset; initiate SMA-2 escalation and recall proceedings" },
-                      { grade: "RG10", pd: "≥ 30.00%", rag: "Red", stage: "Stage 3 (Sub-Standard / NPA)", floor: "100.00%", cadence: "Weekly", auth: "Stressed Asset Resolution Branch", action: "Immediate legal recovery under SARFAESI / IBC NCLT petition" },
+                      { grade: "RG1", pd: "0% – 2%", rag: "Green", stage: "Stage 1", floor: "12m PD × LGD × EAD", cadence: "Annual", auth: "Relationship manager", action: "Business as usual; eligible for cross-sell / limit increase" },
+                      { grade: "RG2", pd: "2% – 4%", rag: "Green", stage: "Stage 1", floor: "12m PD × LGD × EAD", cadence: "Annual", auth: "Relationship manager", action: "Business as usual; monitor at portfolio level" },
+                      { grade: "RG3", pd: "4% – 7%", rag: "Green", stage: "Stage 1", floor: "12m PD × LGD × EAD", cadence: "Semi-annual", auth: "Relationship manager", action: "Standard monitoring; no action" },
+                      { grade: "RG4", pd: "7% – 11%", rag: "Green", stage: "Stage 1", floor: "12m PD × LGD × EAD", cadence: "Quarterly", auth: "Credit analyst", action: "Watch trend; verify latest financials" },
+                      { grade: "RG5", pd: "11% – 16%", rag: "Amber", stage: "Stage 2", floor: "Lifetime proxy (2.5 × PD)", cadence: "Monthly", auth: "Credit analyst", action: "Proactive engagement; confirm cash-flow health" },
+                      { grade: "RG6", pd: "16% – 23%", rag: "Amber", stage: "Stage 2", floor: "Lifetime proxy (2.5 × PD)", cadence: "Monthly", auth: "Credit analyst", action: "Enhanced monitoring; request updated stock / GST statements" },
+                      { grade: "RG7", pd: "23% – 32%", rag: "Amber", stage: "Stage 2", floor: "Lifetime proxy (2.5 × PD)", cadence: "Fortnightly", auth: "Watchlist committee", action: "Restructuring assessment; covenant / collateral review" },
+                      { grade: "RG8", pd: "32% – 45%", rag: "Red", stage: "Stage 2", floor: "Lifetime proxy (2.5 × PD)", cadence: "Fortnightly", auth: "Watchlist committee", action: "Site visit + restructuring offer; tighten limits" },
+                      { grade: "RG9", pd: "45% – 65%", rag: "Red", stage: "Stage 3", floor: "Lifetime, floor 25% of EAD", cadence: "Weekly", auth: "Recovery / stressed assets", action: "Escalate to recovery; provision proactively; RFA review" },
+                      { grade: "RG10", pd: "≥ 65%", rag: "Red", stage: "Stage 3", floor: "Lifetime, floor 50% of EAD", cadence: "Weekly", auth: "Recovery / stressed assets", action: "Initiate collections / recovery; maximise provisioning" },
                     ].map((row) => (
                       <TableRow key={row.grade} className="text-xs">
                         <TableCell className="font-semibold">{row.grade}</TableCell>
@@ -477,7 +467,7 @@ export function OperationsGuidePage() {
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          <Badge variant="outline" className="text-[10px] font-normal">
+                          <Badge variant="outline" className="text-[11px] font-normal">
                             {row.stage}
                           </Badge>
                         </TableCell>

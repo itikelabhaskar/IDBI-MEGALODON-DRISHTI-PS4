@@ -46,6 +46,7 @@ import {
   GuidedTooltip,
   HintIcon,
 } from "@/components/drishti/guided-tooltip";
+import { PageApiDrawer } from "@/components/drishti/page-api-drawer";
 
 export const Route = createFileRoute("/branches")({
   loader: async () => {
@@ -219,24 +220,9 @@ function BranchNetwork() {
     <div className="space-y-6 p-4 md:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-widest text-muted-foreground">
-            <span>Zone → Region → Branch · {totals.accounts.toLocaleString("en-IN")} accounts</span>
-            <Badge
-              variant="outline"
-              className={
-                isLive
-                  ? "border-emerald-500/40 text-emerald-600 bg-emerald-500/10 font-medium text-[9px] px-1.5 py-0 h-4"
-                  : "border-muted-foreground/30 text-muted-foreground font-normal text-[9px] px-1.5 py-0 h-4"
-              }
-            >
-              {isLive ? "Live Branch Rollup (RDS / SQLite)" : "Snapshot Rollup"}
-            </Badge>
-          </div>
-          <h1 className="mt-1 text-xl font-semibold text-foreground">Branch Network</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            Where the stress sits in the network — and which branch to take it up with.
-          </p>
+          <h1 className="text-xl font-semibold text-foreground">Branch Explorer</h1>
         </div>
+        <PageApiDrawer routePath="/branches" triggerLabel="Branch CBS APIs" />
       </div>
 
       {/* Summary strip: 5-Card Grid with Active Sort Highlights */}
@@ -244,7 +230,7 @@ function BranchNetwork() {
         <GuidedTooltip content="Total operational IDBI branches in view across selected zonal filters.">
           <Card className="bg-surface transition-shadow hover:shadow-sm">
             <CardContent className="pt-5">
-              <div className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1">
+              <div className="text-[11px] uppercase tracking-widest text-muted-foreground flex items-center gap-1">
                 Branches in view
                 <HintIcon text="Count of branches currently matching search and zone criteria." />
               </div>
@@ -265,10 +251,10 @@ function BranchNetwork() {
             onClick={() => handleSort("avg_pd")}
           >
             <CardContent className="pt-5">
-              <div className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center justify-between">
+              <div className="text-[11px] uppercase tracking-widest text-muted-foreground flex items-center justify-between gap-2">
                 <span>Average PD</span>
                 <span className={cn(
-                  "text-[9px] font-normal text-primary transition-opacity",
+                  "shrink-0 whitespace-nowrap text-[11px] font-normal normal-case tracking-normal text-primary transition-opacity",
                   sortKey === "avg_pd" ? "opacity-100 font-semibold" : "opacity-0 group-hover:opacity-100"
                 )}>
                   {sortKey === "avg_pd" ? "✓ Sorted" : "Sort table ↓"}
@@ -278,7 +264,7 @@ function BranchNetwork() {
                 {formatPercent(totals.avgPd, 2)}
               </div>
               <div className="mt-0.5 text-[11px] text-muted-foreground">
-                portfolio weighted avg
+                average across accounts
               </div>
             </CardContent>
           </Card>
@@ -293,10 +279,10 @@ function BranchNetwork() {
             onClick={() => handleSort("flag_rate")}
           >
             <CardContent className="pt-5">
-              <div className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center justify-between">
+              <div className="text-[11px] uppercase tracking-widest text-muted-foreground flex items-center justify-between gap-2">
                 <span>Stressed accounts</span>
                 <span className={cn(
-                  "text-[9px] font-normal text-amber-600 transition-opacity",
+                  "shrink-0 whitespace-nowrap text-[11px] font-normal normal-case tracking-normal text-amber-600 transition-opacity",
                   sortKey === "flag_rate" ? "opacity-100 font-semibold" : "opacity-0 group-hover:opacity-100"
                 )}>
                   {sortKey === "flag_rate" ? "✓ Sorted" : "Sort table ↓"}
@@ -321,10 +307,10 @@ function BranchNetwork() {
             onClick={() => handleSort("ecl")}
           >
             <CardContent className="pt-5">
-              <div className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center justify-between">
+              <div className="text-[11px] uppercase tracking-widest text-muted-foreground flex items-center justify-between gap-2">
                 <span>Expected credit loss</span>
                 <span className={cn(
-                  "text-[9px] font-normal text-rose-600 transition-opacity",
+                  "shrink-0 whitespace-nowrap text-[11px] font-normal normal-case tracking-normal text-rose-600 transition-opacity",
                   sortKey === "ecl" ? "opacity-100 font-semibold" : "opacity-0 group-hover:opacity-100"
                 )}>
                   {sortKey === "ecl" ? "✓ Sorted" : "Sort table ↓"}
@@ -345,24 +331,26 @@ function BranchNetwork() {
             className="bg-surface border-band-d/40 cursor-pointer transition-all hover:border-band-d hover:shadow-md active:scale-[0.99] group relative overflow-hidden"
             onClick={handleScrollToWorst}
           >
+            {/* Same shape as the other tiles: label, one headline value, one sub-line. */}
             <CardContent className="pt-5">
-              <div className="flex items-start justify-between">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-band-d font-semibold">
-                    <span>Needs attention first</span>
-                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-band-d/10 border border-band-d/30 group-hover:bg-band-d group-hover:text-white transition-colors">
-                      Scroll to branch ↓
-                    </span>
-                  </div>
-                  <div className="mt-1 truncate text-sm font-semibold text-foreground group-hover:text-band-d transition-colors" title={worst?.branch_name}>
-                    {worst?.branch_name ?? "—"}
-                  </div>
-                  <div className="mt-0.5 text-[11px] text-muted-foreground">
-                    {worst ? `avg PD ${formatPercent(worst.avg_pd, 2)} · ${worst.zone}` : "No matching branch"}
-                  </div>
-                </div>
-                <TriangleAlert className="h-4.5 w-4.5 shrink-0 text-band-d animate-pulse" />
+              <div className="text-[11px] uppercase tracking-widest text-muted-foreground flex items-center justify-between gap-2">
+                <span className="truncate">Needs attention first</span>
+                <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-band-d" />
               </div>
+              <div
+                className="mt-1 truncate text-xl font-semibold text-band-d group-hover:underline"
+                title={worst?.branch_name}
+              >
+                {worst?.branch_name ?? "—"}
+              </div>
+              <div className="mt-0.5 text-[11px] text-muted-foreground">
+                {worst
+                  ? `Avg PD ${formatPercent(worst.avg_pd, 1)} · ${worst.flagged} flagged · ${worst.zone} zone`
+                  : "No matching branch"}
+              </div>
+              {worst && (
+                <div className="mt-1.5 text-[11px] font-medium text-band-d">Show in table ↓</div>
+              )}
             </CardContent>
           </Card>
         </GuidedTooltip>
@@ -397,9 +385,6 @@ function BranchNetwork() {
                 <Building2 className="h-4 w-4 text-primary" />
                 Branch Performance Roster
               </CardTitle>
-              <CardDescription className="text-xs">
-                Grouped by zone and region. Click any branch to filter its accounts in the watchlist.
-              </CardDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative w-full sm:w-56">
@@ -751,7 +736,7 @@ function ZoneBlock({
                             className="hover:text-primary hover:underline inline-flex items-center gap-1.5 group font-medium"
                           >
                             <span>{b.branch_name}</span>
-                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-primary/10 text-primary border border-primary/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
+                            <span className="text-[11px] px-1.5 py-0.2 rounded bg-primary/10 text-primary border border-primary/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
                               Filter ↗
                             </span>
                           </Link>
@@ -787,7 +772,7 @@ function ZoneBlock({
                         className="text-xs text-right tabular-nums text-muted-foreground"
                         title="Realised 12-month default rate in the held-out cohort"
                       >
-                        {formatPercent(b.actual_default_rate, 1)}
+                        {b.actual_default_rate == null ? "—" : formatPercent(b.actual_default_rate, 1)}
                       </TableCell>
                     </TableRow>
                   );

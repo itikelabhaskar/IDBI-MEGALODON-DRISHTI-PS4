@@ -9,16 +9,32 @@ watch bucket, a prescribed action with an owner, and an expected loss in rupees.
 Built for **IDBI Innovate 2026, Problem Statement 4** (MSME credit · predictive AI ·
 risk management).
 
-## Live demo
+## Try the console
 
-**[Open the controlling-office console →](https://huggingface.co/spaces/nightbloodredux/drishti-idbi-ps4)**
+The hosted console runs inside the bank's evaluation sandbox and is not publicly
+reachable. It runs locally with nothing but Node:
 
-No setup required. The console runs against a precomputed snapshot of the held-out India
-MSME cohort, so every page works without the scoring API up: the portfolio watchlist,
-branch rollup, scenario lab, supplier contagion and the governance receipts.
+```bash
+cd web && npm install && npm run dev
+```
 
-To run the whole thing locally instead, including the live scoring API and its Swagger
-documentation, see [Setup](#setup) and [Serving](#serving) below.
+The console reads a precomputed snapshot of the held-out India MSME cohort (synthetic), so
+every page works without the scoring API up. Sign in as one of three roles:
+
+- **Controlling office**: the portfolio watchlist, with a plain-language "why flagged"
+  line per account, branch and sector rollups, the scenario lab, supplier contagion and
+  the governance receipts.
+- **Branch officer**: the same views, scoped to one branch.
+- **Risk admin**: model metrics, drift and fairness receipts, and the thresholds and
+  rating scale.
+
+Each account page carries an action plan (what to do, who owns it, when to review it, and
+which borrower or bank steps bring the PD down) and reads unstructured inputs: an
+officer's visit note or an account statement is turned into signals, and the page shows
+whether the model can use them and how the PD moves when it can.
+
+To run the whole thing, including the live scoring API and its Swagger documentation,
+see [Setup](#setup) and [Serving](#serving) below.
 
 ---
 
@@ -108,7 +124,7 @@ than a claim.
 ```
 raw source ──adapter──► canonical frame ──features──► model ──► calibrated PD
                                                                     │
-                   risk grade → RAG colour → SMA watch → action → ECL
+                   risk grade → RAG colour → early watch → action → ECL
                                                                     │
                         reason codes · early-warning rules · cure path
 ```
@@ -136,14 +152,18 @@ One probability becomes six things every book shares
 |---|---|
 | Risk grade | RG1 (safest) … RG10 |
 | RAG bucket | Green / Amber / Red |
-| Watch bucket | Standard / SMA-0 / SMA-1 / SMA-2 |
+| Early-watch bucket | No watch / Early watch 1 / 2 / 3 |
 | Action | "Enhanced monitoring; request updated stock and GST statements" |
 | Owner + cadence | Credit analyst, monthly |
 | Expected credit loss | PD × LGD × exposure |
 
-A factory loan and a personal loan both come out as, say, *RG6 / Amber / SMA-0 watch /
+A factory loan and a personal loan both come out as, say, *RG6 / Amber / Early watch 1 /
 ₹1.2L*, so a committee can rank them side by side. That is what "consistent, comparable
 and actionable" means in practice.
+
+The early-watch buckets are the model's forward view. The RBI SMA class (SMA-0/1/2, NPA)
+is never derived from the probability: it comes from days past due, and it is shown
+beside the model's view rather than replaced by it.
 
 ### Models
 
@@ -220,7 +240,9 @@ cd web && npm install && npm run dev             # controlling-office console
 
 The API exposes `GET /health`, `GET /segments`, `POST /score`, `POST /score/{segment}`
 and `POST /score/batch`. Responses carry the probability, grade, watch bucket, action,
-expected loss, early-warning triggers and reason codes.
+expected loss, early-warning triggers and reason codes. The console also uses
+`GET /action-plan/{loan_id}`, `POST /unstructured/note`, `POST /unstructured/statement`,
+the decision trail under `/decisions`, and the scenario and contagion simulators.
 
 The console reads a precomputed snapshot by default, so it runs with nothing else up, and
 re-scores live against the API when it is reachable.

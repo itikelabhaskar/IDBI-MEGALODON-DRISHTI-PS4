@@ -40,8 +40,29 @@ def test_score_msme_idbi_insufficient_fields(client):
     assert res.status_code == 422
 
 
+def _book_loan_id(client, i: int = 0) -> str:
+    """A loan that exists in the (temp, seeded) book: decisions on unknown IDs are refused."""
+    return client.get(f"/portfolio?limit={i + 1}").json()["borrowers"][i]["loan_id"]
+
+
+def test_decision_on_unknown_loan_is_refused(client):
+    res = client.post("/decisions", json={"loan_id": "NOT_IN_BOOK_123", "decision": "accept"})
+    assert res.status_code == 404
+
+
+def test_decision_rationale_is_pii_masked(client):
+    loan_id = _book_loan_id(client)
+    res = client.post(
+        "/decisions",
+        json={"loan_id": loan_id, "decision": "defer", "rationale": "Promoter PAN ABCDE1234F, call 9876543210"},
+    )
+    assert res.status_code == 200
+    stored = client.get(f"/decisions/{loan_id}").json()[0]
+    assert "ABCDE1234F" not in str(stored) and "9876543210" not in str(stored)
+
+
 def test_decision_crud_lifecycle(client):
-    loan_id = "LN_DECISION_TEST_01"
+    loan_id = _book_loan_id(client)
 
     # 1. Accept decision
     p1 = {
@@ -100,18 +121,19 @@ def test_decision_crud_lifecycle(client):
     assert len(all_res.json()) >= 3
 
 
-def test_decision_invalid_type_raises_400(client):
+def test_decision_invalid_type_is_rejected(client):
     payload = {
-        "loan_id": "LN_FAIL",
+        "loan_id": _book_loan_id(client),
         "decision": "invalid_decision_type",
     }
     res = client.post("/decisions", json=payload)
-    assert res.status_code == 400
+    assert res.status_code == 422
 
 
 def test_decision_defer(client):
+    loan_id = _book_loan_id(client, 1)
     payload = {
-        "loan_id": "LN_DEFER_TEST",
+        "loan_id": loan_id,
         "decision": "defer",
         "rationale": "Pending Q3 GST reconciliation",
         "officer": "officer_defer",
@@ -120,7 +142,7 @@ def test_decision_defer(client):
     assert res.status_code == 200
     data = res.json()
     assert data["decision"] == "defer"
-    assert data["loan_id"] == "LN_DEFER_TEST"
+    assert data["loan_id"] == loan_id
 
 
 def test_score_msme_idbi_triggers_ews18_19(client):
@@ -235,6 +257,8 @@ def test_underwrite_submit_endpoint(client):
     saved = res_get.json()
     assert saved["loan_id"] == loan_id
     assert saved["sanction_limit"] == 3000000.0
+    # A branch officer's proposal is booked to the branch it was raised from.
+    assert saved["branch_code"] == "1019"
 
     # Verify decision logged in audit trail
     res_decs = client.get(f"/decisions/{loan_id}")
@@ -424,4 +448,122 @@ def test_contagion_simulate_endpoint(client):
     assert res_get.json()["status"] == "success"
 
 
+def test_override_records_committee_grade(client):
+    """An override keeps the model grade and records the committee grade beside it."""
+    book = client.get("/portfolio?limit=1").json()["borrowers"][0]
+    res = client.post(
+        "/decisions",
+        json={"loan_id": book["loan_id"], "decision": "override", "risk_grade": book["risk_grade"],
+              "revised_grade": "RG3", "rationale": "Collateral top-up received", "role": "Zonal committee"},
+    )
+    assert res.status_code == 200
+    loan = client.get(f"/borrowers/{book['loan_id']}").json()
+    assert loan["risk_grade"] == book["risk_grade"] and loan["committee_grade"] == "RG3"
+    rec = client.get(f"/decisions/{book['loan_id']}").json()[0]
+    assert rec["revised_grade"] == "RG3" and rec["role"] == "Zonal committee"
+    assert rec["rationale"] == "Collateral top-up received"
 
+    # A later non-override decision returns the account to its model grade.
+    client.post("/decisions", json={"loan_id": book["loan_id"], "decision": "accept"})
+    assert client.get(f"/borrowers/{book['loan_id']}").json()["committee_grade"] is None
+
+
+def test_underwrite_submit_restructure(client):
+    """Test submitting an underwriting appraisal with RESTRUCTURE decision."""
+    payload = {
+        "loan_id": "IDBI_RESTRUCTURE_TEST_99",
+        "segment": "msme_idbi",
+        "sanction_limit": 5_000_000.0,
+        "drawing_power": 3_500_000.0,
+        "demanded_vs_collected_ratio": 0.75,
+        "cibil_score": 620.0,
+        "dpd": 45.0,
+        "emi_bounce_6m": 2,
+        "lien_flag": 0,
+        "restructuring_flag": 0,
+        "decision": "restructure",
+        "override_action": "Evaluate MSME Restructuring (TEV Study)",
+        "rationale": "Viable auto-ancillary unit; recommend 6m moratorium on principal and FITL.",
+        "officer": "CREDIT_HEAD_01",
+    }
+    res = client.post("/underwrite/submit", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "success"
+    assert data["decision"]["decision"] == "restructure"
+    assert data["borrower"]["reviewed_status"] == "RESTRUCTURE"
+    assert data["borrower"]["reviewed_by"] == "CREDIT_HEAD_01"
+
+
+
+
+
+
+def test_decision_sets_loan_review_status(client):
+    """A committee decision and the loan's review badge come from one write."""
+    loan_id = client.get("/portfolio?limit=1").json()["borrowers"][0]["loan_id"]
+    expected = {"defer": "DEFERRED", "reject": "FLAGGED_SARB", "accept": "REVIEWED"}
+    for decision, status in expected.items():
+        res = client.post("/decisions", json={"loan_id": loan_id, "decision": decision, "officer": "IDBI-CO-1"})
+        assert res.status_code == 200
+        assert client.get(f"/borrowers/{loan_id}").json()["reviewed_status"] == status
+
+
+def test_underwrite_new_proposal_cannot_overwrite_book_account(client):
+    """A new proposal under an existing ID is refused; re-rating keeps the account's branch."""
+    existing = client.get("/portfolio?limit=1").json()["borrowers"][0]
+    base = {
+        "loan_id": existing["loan_id"],
+        "segment": "msme_idbi",
+        "sanction_limit": 2_500_000.0,
+        "drawing_power": 2_000_000.0,
+        "state": "KA",
+    }
+    assert client.post("/underwrite/submit", json={**base, "mode": "new"}).status_code == 409
+
+    rerated = client.post("/underwrite/submit", json={**base, "mode": "rerate"}).json()["borrower"]
+    assert rerated["branch_code"] == existing["branch_code"]
+
+    fresh = client.post(
+        "/underwrite/submit", json={**base, "loan_id": "IDBI-APP-TEST-NEW1", "mode": "new"}
+    ).json()["borrower"]
+    # New proposals land in an in-state branch from the registry, not a fixed 1019 / Mumbai.
+    from src.features.org_hierarchy import BRANCH_REGISTRY
+
+    branch = next(b for b in BRANCH_REGISTRY if b["branch_code"] == fresh["branch_code"])
+    assert branch["state"] == "KA" and fresh["region"] == branch["region"]
+
+
+def test_batch_upload_without_bounce_field_and_existing_ids(client):
+    """Extracts often lack emi_bounce_6m; and a row for a book account must not overwrite it."""
+    book = client.get("/portfolio?limit=1").json()["borrowers"][0]
+    rows = [
+        {"loan_id": "BATCH_NEW_1", "sanction_limit": 1_500_000, "drawing_power": 1_200_000,
+         "cibil_score": 700, "demanded_vs_collected_ratio": 0.9, "state": "KA"},
+        {"loan_id": book["loan_id"], "sanction_limit": 10, "drawing_power": 10, "state": "KA"},
+    ]
+    res = client.post("/batch/upload", json={"records": rows, "segment": "msme_idbi"})
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["skipped_existing"] == [book["loan_id"]]
+    assert body["saved_accounts"] == 1
+    after = client.get(f"/borrowers/{book['loan_id']}").json()
+    assert after["risk_grade"] == book["risk_grade"] and after["branch_code"] == book["branch_code"]
+    new = client.get("/borrowers/BATCH_NEW_1").json()
+    from src.features.org_hierarchy import BRANCH_REGISTRY
+
+    branch = next(b for b in BRANCH_REGISTRY if b["branch_code"] == new["branch_code"])
+    assert branch["state"] == "KA"
+
+
+def test_batch_upload_screening_only_saves_nothing(client):
+    """persist=False scores the extract but leaves the loan master and run log alone."""
+    before = client.get("/portfolio/summary").json()["total_accounts"]
+    rows = [{"loan_id": f"SCREEN_{i}", "sanction_limit": 1_000_000 + i, "drawing_power": 900_000,
+             "cibil_score": 700, "demanded_vs_collected_ratio": 0.95, "state": "MH"} for i in range(5)]
+    res = client.post("/batch/upload", json={"records": rows, "persist": False})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["persisted"] is False and body["saved_accounts"] == 0
+    assert len(body["scored_records"]) == 5
+    assert client.get("/portfolio/summary").json()["total_accounts"] == before

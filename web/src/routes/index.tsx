@@ -37,7 +37,9 @@ import {
   Pie,
   Cell,
 } from "recharts";
-import { listBorrowers, fetchPortfolio, fetchPortfolioSummary } from "@/lib/api";
+import { listBorrowers, fetchPortfolio, fetchPortfolioSummary, createDecision, localReviewStatus } from "@/lib/api";
+import { useDecisionRights, useRole, useScopeBranch } from "@/lib/role-context";
+import { dpdOf, rbiSma, watchLabel, whyFlaggedLine } from "@/lib/plain-language";
 import type { BorrowerScore, RiskGrade, RagBucket } from "@/lib/types";
 import {
   formatInrCompact,
@@ -56,6 +58,7 @@ import {
   GuidedTipsBanner,
   useGuidedTips,
 } from "@/components/drishti/guided-tips";
+import { PageApiDrawer } from "@/components/drishti/page-api-drawer";
 import {
   Search,
   TrendingUp,
@@ -83,10 +86,34 @@ import {
   AlertCircle,
 } from "lucide-react";
 
+type Triage = "all" | "critical" | "watchlist" | "renewals";
+
+type PortfolioSearch = {
+  branch?: string;
+  sector?: string;
+  q?: string;
+  rag?: string;
+  seg?: string;
+  triage?: Triage;
+  sort?: "pd" | "ecl";
+  view?: "standard" | "compact";
+};
+
+const str = (v: unknown): string | undefined => (v == null || v === "" ? undefined : String(v));
+
 export const Route = createFileRoute("/")({
-  // ?branch=<code> arrives from the Branch Network drill-down.
-  validateSearch: (search: Record<string, unknown>): { branch?: string } => ({
-    branch: typeof search.branch === "string" ? search.branch : undefined,
+  // Every filter lives in the URL, so opening a borrower and coming back (or
+  // sharing the link) keeps the officer's view. ?branch= arrives from the Branch
+  // Network drill-down; a typed /?branch=1042 is parsed as a number, hence String().
+  validateSearch: (search: Record<string, unknown>): PortfolioSearch => ({
+    branch: str(search.branch),
+    sector: str(search.sector),
+    q: str(search.q),
+    rag: str(search.rag),
+    seg: str(search.seg),
+    triage: (["critical", "watchlist", "renewals"] as const).find((t) => t === search.triage),
+    sort: search.sort === "ecl" ? "ecl" : undefined,
+    view: search.view === "compact" ? "compact" : undefined,
   }),
   loader: async () => await listBorrowers(),
   component: PortfolioConsole,
@@ -118,7 +145,7 @@ function KpiTile({
       <CardContent className="pt-5">
         <div className="flex items-start justify-between">
           <div>
-            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+            <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-muted-foreground">
               <span>{label}</span>
               {guidedTip && tipsEnabled && (
                 <span className="text-amber-500/80">
@@ -177,9 +204,21 @@ function TableHeaderTip({
   );
 }
 
+// Queues are set by PD and stage, not by RAG colour alone, so the urgent queue
+// also holds Amber accounts (Amber starts at 11%). Shown with the active queue.
+const QUEUE_RULE: Record<"critical" | "watchlist" | "renewals", string> = {
+  critical:
+    "Red accounts, plus any account with PD ≥ 12% or in Stage 2–3 with PD ≥ 8%. Amber accounts with high PD land here too.",
+  watchlist: "Amber or PD 4–12% accounts that are not already in the urgent queue.",
+  renewals: "Green, Stage 1 and PD below 3%.",
+};
+
 function PortfolioConsole() {
   const initialData = Route.useLoaderData();
-  const { branch: branchCode } = Route.useSearch();
+  const { branch: urlBranch } = Route.useSearch();
+  // A branch officer always sees their own branch; the URL can't widen it.
+  const scope = useScopeBranch();
+  const branchCode = scope ?? urlBranch;
   const navigate = Route.useNavigate();
 
   const [data, setData] = useState(initialData);
@@ -211,11 +250,21 @@ function PortfolioConsole() {
   );
   const branchName = borrowers[0]?.branch_name;
 
-  const [query, setQuery] = useState("");
-  const [ragFilter, setRagFilter] = useState<string>("all");
-  const [segmentFilter, setSegmentFilter] = useState<string>("all");
-  const [sortKey, setSortKey] = useState<"pd" | "ecl">("pd");
-  const [triageFilter, setTriageFilter] = useState<"all" | "critical" | "watchlist" | "renewals">("all");
+  const search = Route.useSearch();
+  const setSearch = (patch: Partial<PortfolioSearch>) =>
+    navigate({ search: (prev: PortfolioSearch) => ({ ...prev, ...patch }), replace: true });
+  const query = search.q ?? "";
+  const setQuery = (v: string) => setSearch({ q: v || undefined });
+  const ragFilter = search.rag ?? "all";
+  const setRagFilter = (v: string) => setSearch({ rag: v === "all" ? undefined : v });
+  const segmentFilter = search.seg ?? "all";
+  const setSegmentFilter = (v: string) => setSearch({ seg: v === "all" ? undefined : v });
+  const sortKey = search.sort ?? "pd";
+  const setSortKey = (v: "pd" | "ecl") => setSearch({ sort: v === "pd" ? undefined : v });
+  const triageFilter: Triage = search.triage ?? "all";
+  const setTriageFilter = (v: Triage) => setSearch({ triage: v === "all" ? undefined : v });
+  const viewMode = search.view ?? "standard";
+  const setViewMode = (v: "standard" | "compact") => setSearch({ view: v === "standard" ? undefined : v });
 
   const { tipsEnabled, setTipsEnabled } = useGuidedTips();
   const tableRef = useRef<HTMLDivElement>(null);
@@ -229,10 +278,8 @@ function PortfolioConsole() {
   }, []);
 
   const handleClearAllFilters = () => {
-    setQuery("");
-    setRagFilter("all");
-    setSegmentFilter("all");
-    setTriageFilter("all");
+    // Keeps the view mode; clears every filter including a branch drill-down.
+    navigate({ search: (prev: PortfolioSearch) => ({ view: prev.view }), replace: true });
     toast.info("All watchlist filters cleared", { duration: 1500 });
   };
 
@@ -261,6 +308,13 @@ function PortfolioConsole() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (["INPUT", "TEXTAREA", "SELECT"].includes((e.target as HTMLElement)?.tagName)) {
+        return;
+      }
+      // Esc that closes a dropdown, dialog or the command palette must not also wipe the filters.
+      if (
+        e.defaultPrevented ||
+        document.querySelector('[role="dialog"], [role="listbox"], [role="menu"], [data-radix-popper-content-wrapper]')
+      ) {
         return;
       }
       if (e.key === "1") {
@@ -315,7 +369,7 @@ function PortfolioConsole() {
         red: liveSummary.red_count,
       };
     }
-    const flagged = borrowers.filter((b) => b.pd >= (model?.threshold ?? 0.08));
+    const flagged = borrowers.filter((b) => b.pd >= (model?.threshold ?? 0.16));
     const totalEcl = borrowers.reduce((s, b) => s + b.ecl, 0);
     const red = borrowers.filter((b) => b.rag === "Red").length;
     return {
@@ -353,6 +407,7 @@ function PortfolioConsole() {
       rows = triageQueues.renewals.accounts;
     }
 
+    if (search.sector) rows = rows.filter((b) => b.sector === search.sector);
     if (segmentFilter !== "all") rows = rows.filter((b) => b.segment === segmentFilter);
     if (ragFilter !== "all") rows = rows.filter((b) => b.rag === ragFilter);
     if (query.trim()) {
@@ -367,9 +422,11 @@ function PortfolioConsole() {
       );
     }
     return [...rows].sort((a, b) => b[sortKey] - a[sortKey]);
-  }, [borrowers, query, ragFilter, segmentFilter, sortKey, triageFilter, triageQueues]);
+  }, [borrowers, query, ragFilter, segmentFilter, sortKey, triageFilter, triageQueues, search.sector]);
 
   const hasActiveFilters = Boolean(
+    (branchCode && !scope) ||
+    search.sector ||
     query.trim() ||
     ragFilter !== "all" ||
     segmentFilter !== "all" ||
@@ -392,7 +449,9 @@ function PortfolioConsole() {
       "Risk Grade",
       "Ind AS 109 Stage",
       "RAG Status",
-      "SMA Status",
+      "RBI SMA (days past due)",
+      "Model early watch",
+      "Why flagged",
       "EAD (INR)",
       "ECL (INR)",
       "Recommended Action",
@@ -408,7 +467,9 @@ function PortfolioConsole() {
       b.risk_grade,
       `Stage ${b.ecl_stage ?? 1}`,
       b.rag,
-      b.sma_status,
+      rbiSma(dpdOf(b)) ?? "",
+      watchLabel(b.sma_status),
+      `"${whyFlaggedLine(b).replace(/"/g, '""')}"`,
       b.ead ?? 0,
       b.ecl ?? 0,
       `"${(b.action ?? "").replace(/"/g, '""')}"`,
@@ -433,45 +494,52 @@ function PortfolioConsole() {
         description="Hover over morning triage cards, KPI metrics, and table column headers for RBI early warning definitions."
       />
 
-      {/* eyebrow */}
       <div>
-        <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-widest text-muted-foreground">
-          <span>
-            India MSME book · {data.source.mode === "live" ? "Live Master Database" : "synthetic snapshot"} · {borrowers.length} accounts
-          </span>
-          <Badge
-            variant="outline"
-            className={
-              data.source.mode === "live"
-                ? "border-emerald-500/40 text-emerald-600 bg-emerald-500/10 font-medium text-[9px] px-1.5 py-0 h-4"
-                : "border-muted-foreground/30 text-muted-foreground font-normal text-[9px] px-1.5 py-0 h-4"
-            }
-          >
-            {data.source.mode === "live" ? "Live RDS / SQLite" : "Snapshot Mode"}
-          </Badge>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-xl font-semibold text-foreground">{scope ? "Branch Watchlist" : "Portfolio Console"}</h1>
+          <PageApiDrawer routePath="/" triggerLabel="IDBI Sandbox APIs" />
         </div>
-        <h1 className="mt-1 text-xl font-semibold text-foreground">Portfolio Console</h1>
-        <p className="mt-0.5 text-sm text-muted-foreground">
-          Stress seen 12 months ahead — calibrated PD, RBI-aligned grades and watch actions.
-        </p>
+        {search.sector && (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className="border-primary/30 bg-primary/10 font-normal capitalize">
+              Sector · {search.sector.replace(/_/g, " ")}
+            </Badge>
+            <button
+              type="button"
+              onClick={() => setSearch({ sector: undefined })}
+              className="text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            >
+              clear sector
+            </button>
+            <Link to="/market" search={{ tab: "sectors" }} className="text-[11px] text-primary hover:underline">
+              Back to Sectors
+            </Link>
+          </div>
+        )}
         {branchCode && (
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="border-primary/30 bg-primary/10 font-normal">
               <Building2 className="mr-1 h-3 w-3" />
-              Branch {branchCode}
+              {scope ? "Your branch" : "Branch"} {branchCode}
               {branchName ? ` · ${branchName}` : ""}
             </Badge>
-            <button
-              type="button"
-              onClick={() => navigate({ search: {} })}
-              className="text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
-            >
-              clear filter
-            </button>
-            {borrowers.length === 0 && (
+            {scope ? (
               <span className="text-[11px] text-muted-foreground">
-                No sampled accounts for this branch — the 400-row sample does not cover every
-                branch. Branch totals come from the full cohort on the Branch Network page.
+                Branch officer view: only this branch&apos;s accounts. The controlling office sees the whole book.
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => navigate({ search: {} })}
+                className="text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+              >
+                clear filter
+              </button>
+            )}
+            {data.source.mode !== "live" && (
+              <span className="text-[11px] text-muted-foreground">
+                Offline snapshot: this list holds only the sampled accounts of this branch
+                ({borrowers.length}); the Branch Network page counts the branch&apos;s full test cohort.
               </span>
             )}
           </div>
@@ -487,7 +555,7 @@ function PortfolioConsole() {
               <CardTitle className="text-sm font-semibold uppercase tracking-wider text-foreground">
                 Officer Morning Triage · Action Queue
               </CardTitle>
-              <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 font-normal text-muted-foreground border-border/80">
+              <Badge variant="outline" className="text-[11px] px-1.5 py-0 h-4 font-normal text-muted-foreground border-border/80">
                 Daily Priority
               </Badge>
             </div>
@@ -547,8 +615,8 @@ function PortfolioConsole() {
                     <AlertOctagon className="h-4 w-4" />
                     🔴 Urgent Action (Act within 24h)
                   </span>
-                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-red-500/40 text-red-600 font-medium">
-                    High Risk / SMA-1/2
+                  <Badge variant="outline" className="text-[11px] px-1.5 py-0 border-red-500/40 text-red-600 font-medium">
+                    High risk
                   </Badge>
                 </div>
                 <div className="mt-2 flex items-baseline gap-2">
@@ -560,7 +628,7 @@ function PortfolioConsole() {
                   </span>
                 </div>
                 <p className="mt-1 text-[11px] text-muted-foreground line-clamp-2">
-                  Drawing power erosion ≥ 25%, multiple NACH returns, or Stage 2/3 slippage risk. Immediate intervention required.
+                  Red accounts, any account with PD ≥ 12%, and Stage 2–3 accounts with PD ≥ 8%. Act within 24 hours.
                 </p>
                 <div className="mt-3 flex items-center justify-between text-[11px]">
                   <span className="font-medium text-red-600 dark:text-red-400">
@@ -575,7 +643,7 @@ function PortfolioConsole() {
             <GuidedTooltip
               step="2"
               title="Step 2: Weekly Covenant Watchlist"
-              tip="Weekly review for borrowers with incipient stress signals — GST filing delays > 15 days, minor drawing power dips, or SMA-0 status. Click to filter and smoothly scroll to the queue table."
+              tip="Weekly review for borrowers with incipient stress signals — GST filing delays > 15 days, minor drawing power dips, or 1–30 days overdue (RBI SMA-0). Click to filter and smoothly scroll to the queue table."
               side="top"
             >
               <div
@@ -599,8 +667,8 @@ function PortfolioConsole() {
                     <ShieldAlert className="h-4 w-4" />
                     🟡 Covenant Watchlist (Weekly)
                   </span>
-                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-amber-500/40 text-amber-600 font-medium">
-                    Moderate Risk / SMA-0
+                  <Badge variant="outline" className="text-[11px] px-1.5 py-0 border-amber-500/40 text-amber-600 font-medium">
+                    Moderate risk
                   </Badge>
                 </div>
                 <div className="mt-2 flex items-baseline gap-2">
@@ -612,7 +680,7 @@ function PortfolioConsole() {
                   </span>
                 </div>
                 <p className="mt-1 text-[11px] text-muted-foreground line-clamp-2">
-                  Incipient stress, GST filing delays &gt; 15 days, or drawing power monitoring. Audit covenants and demand margin.
+                  Amber accounts and PD 4–12% not already urgent. Review covenants and drawing power this week.
                 </p>
                 <div className="mt-3 flex items-center justify-between text-[11px]">
                   <span className="font-medium text-amber-600 dark:text-amber-400">
@@ -651,7 +719,7 @@ function PortfolioConsole() {
                     <CheckCircle2 className="h-4 w-4" />
                     🟢 Fast-Track Renewals (Clean Book)
                   </span>
-                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-emerald-500/40 text-emerald-600 font-medium">
+                  <Badge variant="outline" className="text-[11px] px-1.5 py-0 border-emerald-500/40 text-emerald-600 font-medium">
                     Prime RG1–RG3
                   </Badge>
                 </div>
@@ -664,7 +732,7 @@ function PortfolioConsole() {
                   </span>
                 </div>
                 <p className="mt-1 text-[11px] text-muted-foreground line-clamp-2">
-                  Clean repayment track, 0 bounces, perfect debt service. Eligible for 1-click renewal and facility limit top-up.
+                  Green, Stage 1, PD below 3%. Candidates for renewal or a limit increase.
                 </p>
                 <div className="mt-3 flex items-center justify-between text-[11px]">
                   <span className="font-medium text-emerald-600 dark:text-emerald-400">
@@ -683,18 +751,26 @@ function PortfolioConsole() {
         <KpiTile
           label="Flagged for stress"
           value={String(kpis.flagged)}
-          sub={`${formatPercent(kpis.flagRate)} of sampled book at PD ≥ ${formatPercent(model?.threshold ?? 0.08)}`}
+          sub={`${formatPercent(kpis.flagRate)} of ${data.source.mode === "live" ? "the book" : "the snapshot"} at PD ≥ ${formatPercent(model?.threshold ?? 0.16)}`}
           icon={Radar}
           step="4"
-          guidedTip="Identifies accounts whose 12-month Probability of Default (PD) exceeds the 8.0% decision threshold. Prioritized for proactive credit intervention before SMA migration."
+          guidedTip="Accounts whose 12-month PD is at or above the model's flag threshold (16%, the start of RG6). The same count the Branch Network page uses."
         />
         <KpiTile
-          label="Default propensity"
-          value={kpis.propensity != null ? formatPercent(kpis.propensity) : "—"}
-          sub="of loans we flag actually default within 12m"
+          label="Flag lift"
+          value={
+            kpis.propensity != null
+              ? `${(kpis.propensity / (model?.base_default_rate ?? 0.039)).toFixed(1)}×`
+              : "—"
+          }
+          sub={
+            kpis.propensity != null
+              ? `flagged loans default ${formatPercent(kpis.propensity, 0)} of the time vs ${formatPercent(model?.base_default_rate ?? 0.039, 1)} for an average loan`
+              : "flagged loans vs an average loan"
+          }
           icon={Target}
           step="5"
-          guidedTip="Precision metric: percentage of flagged borrowers that actually experience default within 12 months. Calibrated via isotonic regression to prevent false-alarm fatigue."
+          guidedTip="How much riskier a flagged loan (PD ≥ 16%) is than an average one, on the held-out test set: the share of flagged loans that default within 12 months divided by the base default rate. Read it against the base rate: an average loan defaults 3.9% of the time. A higher cut raises the hit rate but misses more defaults; the operating-point table on Model Governance shows the trade-off."
         />
         <KpiTile
           label="Expected credit loss"
@@ -719,9 +795,6 @@ function PortfolioConsole() {
         <Card className="bg-surface lg:col-span-3">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">Risk grade distribution</CardTitle>
-            <CardDescription className="text-xs">
-              RG1 (safest) → RG10 (severe). RG7+ enters the watchlist committee.
-            </CardDescription>
           </CardHeader>
           <CardContent className="h-64">
             <ResponsiveContainer width="100%" height="100%">
@@ -809,9 +882,6 @@ function PortfolioConsole() {
           <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
             <div className="min-w-0">
               <CardTitle className="text-sm font-semibold">Watchlist queue</CardTitle>
-              <CardDescription className="text-xs text-muted-foreground">
-                Sorted by PD — click a borrower for reason codes, EWS and recourse.
-              </CardDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2.5">
               <div className="relative w-full sm:w-60">
@@ -859,8 +929,36 @@ function PortfolioConsole() {
               >
                 <Download className="h-3.5 w-3.5 text-primary" />
                 <span>Export CSV</span>
-                <span className="text-[10px] text-muted-foreground tabular-nums">({filtered.length})</span>
+                <span className="text-[11px] text-muted-foreground tabular-nums">({filtered.length})</span>
               </Button>
+              <div className="inline-flex items-center rounded border border-border/80 p-0.5 bg-muted/40 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("standard")}
+                  className={cn(
+                    "px-2 py-1 text-[11px] rounded transition-colors font-medium cursor-pointer",
+                    viewMode === "standard"
+                      ? "bg-background text-foreground shadow-xs font-semibold"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                  title="Full 13-column portfolio view"
+                >
+                  Standard (13 col)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("compact")}
+                  className={cn(
+                    "px-2 py-1 text-[11px] rounded transition-colors font-medium cursor-pointer",
+                    viewMode === "compact"
+                      ? "bg-background text-foreground shadow-xs font-semibold"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                  title="Compact 7-column view (optimized for 14-inch branch laptops)"
+                >
+                  Compact (7 col)
+                </button>
+              </div>
             </div>
           </div>
         </CardHeader>
@@ -882,27 +980,30 @@ function PortfolioConsole() {
                 {triageFilter !== "all" && (
                   <Badge variant="outline" className="text-xs bg-background border-primary/40 text-foreground font-medium shrink-0">
                     {triageFilter === "critical"
-                      ? "🔴 Urgent Action Queue (24h)"
+                      ? "Urgent Action Queue (24h)"
                       : triageFilter === "watchlist"
-                      ? "🟡 Covenant Watchlist (Weekly)"
-                      : "🟢 Fast-Track Clean Renewals"}
+                      ? "Covenant Watchlist (Weekly)"
+                      : "Fast-Track Clean Renewals"}
                   </Badge>
                 )}
                 <span className="text-muted-foreground shrink-0">
                   — Showing <strong className="text-foreground tabular-nums">{filtered.length}</strong> of {borrowers.length} facilities
                 </span>
+                {triageFilter !== "all" && (
+                  <span className="basis-full text-[11px] text-muted-foreground">{QUEUE_RULE[triageFilter]}</span>
+                )}
                 {query.trim() && (
-                  <Badge variant="outline" className="text-[10px] bg-background truncate max-w-44">
+                  <Badge variant="outline" className="text-[11px] bg-background truncate max-w-44">
                     Search: "{query}"
                   </Badge>
                 )}
                 {segmentFilter !== "all" && (
-                  <Badge variant="outline" className="text-[10px] bg-background shrink-0">
+                  <Badge variant="outline" className="text-[11px] bg-background shrink-0">
                     Segment: {segmentFilter}
                   </Badge>
                 )}
                 {ragFilter !== "all" && (
-                  <Badge variant="outline" className="text-[10px] bg-background shrink-0">
+                  <Badge variant="outline" className="text-[11px] bg-background shrink-0">
                     RAG: {ragFilter}
                   </Badge>
                 )}
@@ -918,95 +1019,130 @@ function PortfolioConsole() {
               </Button>
             </div>
           )}
-          <Table containerClassName="max-h-[520px] overflow-auto" className="min-w-[1150px]">
+          <Table
+            containerClassName="max-h-[520px] overflow-auto"
+            className={viewMode === "compact" ? "min-w-[780px]" : "min-w-[1150px]"}
+          >
             <TableHeader className="sticky top-0 bg-surface z-20 shadow-[0_1px_0_0_var(--color-border)]">
-              <TableRow>
-                <TableHead className="text-xs bg-surface pl-4">
-                  <TableHeaderTip
-                    title="Loan / Facility ID"
-                    tip="Core Finacle / CBS account identifier. Click ID to inspect borrower CAM dossier, or click the copy icon to copy the loan ID to clipboard."
-                  >
-                    Loan ID
-                  </TableHeaderTip>
-                </TableHead>
-                <TableHead className="text-xs bg-surface">Sector</TableHead>
-                <TableHead className="text-xs bg-surface">State</TableHead>
-                <TableHead className="text-xs bg-surface">Branch</TableHead>
-                <TableHead className="text-xs bg-surface">Sub-segment</TableHead>
-                <TableHead className="text-xs bg-surface text-right">
-                  <TableHeaderTip
-                    title="Probability of Default (12-Month PD)"
-                    tip="Calibrated likelihood that borrower defaults within 12 months. Calibrated via isotonic regression across 35+ banking, GST, and behavioral features."
-                  >
-                    PD (12m)
-                  </TableHeaderTip>
-                </TableHead>
-                <TableHead className="text-xs bg-surface">
-                  <TableHeaderTip
-                    title="Risk Grade (RG1–RG10)"
-                    tip="DRISHTI 10-tier rating grade aligned with RBI supervisory rating guidelines. RG1–RG3: Prime; RG4–RG6: Watch; RG7–RG10: High / Severe Stress (enters Watchlist Committee)."
-                  >
-                    Grade
-                  </TableHeaderTip>
-                </TableHead>
-                <TableHead className="text-xs bg-surface">
-                  <TableHeaderTip
-                    title="Ind AS 109 Asset Stage"
-                    tip="Stage 1: Performing loan (12m ECL required). Stage 2: Significant Increase in Credit Risk (SICR, Lifetime ECL). Stage 3: Credit-impaired / NPA (>90 DPD)."
-                  >
-                    Stage
-                  </TableHeaderTip>
-                </TableHead>
-                <TableHead className="text-xs bg-surface">
-                  <TableHeaderTip
-                    title="RAG Operational Status"
-                    tip="Red: Action within 24h (drawing power erosion, bounce spike). Amber: Weekly covenant audit. Green: Clean standard servicing."
-                  >
-                    RAG
-                  </TableHeaderTip>
-                </TableHead>
-                <TableHead className="text-xs bg-surface">
-                  <TableHeaderTip
-                    title="Special Mention Account (SMA)"
-                    tip="RBI SMA tagging: Standard: 0 DPD; SMA-0: 1–30 DPD; SMA-1: 31–60 DPD; SMA-2: 61–90 DPD; NPA: >90 DPD."
-                  >
-                    SMA
-                  </TableHeaderTip>
-                </TableHead>
-                <TableHead className="text-xs bg-surface text-right">
-                  <TableHeaderTip
-                    title="Exposure at Default (EAD)"
-                    tip="Total sanctioned limit plus drawn balance exposed to credit risk at the point of default."
-                  >
-                    EAD
-                  </TableHeaderTip>
-                </TableHead>
-                <TableHead className="text-xs bg-surface text-right">
-                  <TableHeaderTip
-                    title="Expected Credit Loss (ECL)"
-                    tip="Ind AS 109 accounting provision = EAD × PD × LGD (Loss Given Default: 45%). Pre-emptive provisioning."
-                  >
-                    ECL
-                  </TableHeaderTip>
-                </TableHead>
-                <TableHead className="text-xs bg-surface text-right pr-4">
-                  <TableHeaderTip
-                    title="Credit Action / CAM Dossier"
-                    tip="Jump to full Credit Assessment Memorandum (CAM) containing SHAP driver reasons, GST-banking reconciliation, and RBI early warning triggers."
-                    side="left"
-                  >
-                    Action
-                  </TableHeaderTip>
-                </TableHead>
-              </TableRow>
+              {viewMode === "compact" ? (
+                <TableRow>
+                  <TableHead className="text-xs bg-surface pl-4">
+                    <TableHeaderTip title="Loan / Facility ID" tip="Finacle facility number and MSME sector">
+                      Loan ID & Sector
+                    </TableHeaderTip>
+                  </TableHead>
+                  <TableHead className="text-xs bg-surface">Branch & State</TableHead>
+                  <TableHead className="text-xs bg-surface text-right">
+                    <TableHeaderTip title="Exposure at Default" tip="Sanctioned credit facility limit">
+                      Limit (EAD)
+                    </TableHeaderTip>
+                  </TableHead>
+                  <TableHead className="text-xs bg-surface text-right">
+                    <TableHeaderTip title="12-Month PD" tip="Calibrated default probability">
+                      PD (12m)
+                    </TableHeaderTip>
+                  </TableHead>
+                  <TableHead className="text-xs bg-surface">
+                    <TableHeaderTip title="Grade, RBI SMA and model watch" tip="Model grade (→ committee grade after an override). Second line: RBI SMA from days past due · the model's early-watch bucket from PD.">
+                      Grade & SMA
+                    </TableHeaderTip>
+                  </TableHead>
+                  <TableHead className="text-xs bg-surface">
+                    <TableHeaderTip title="Asset Stage & RAG" tip="Ind AS 109 staging (1, 2, 3) and RAG operational status">
+                      Stage & RAG
+                    </TableHeaderTip>
+                  </TableHead>
+                  <TableHead className="text-xs bg-surface text-right pr-4">Action & Review</TableHead>
+                </TableRow>
+              ) : (
+                <TableRow>
+                  <TableHead className="text-xs bg-surface pl-4">
+                    <TableHeaderTip
+                      title="Loan / Facility ID"
+                      tip="Core Finacle / CBS account identifier. Click ID to inspect borrower CAM dossier, or click the copy icon to copy the loan ID to clipboard."
+                    >
+                      Loan ID
+                    </TableHeaderTip>
+                  </TableHead>
+                  <TableHead className="text-xs bg-surface">Sector</TableHead>
+                  <TableHead className="text-xs bg-surface">State</TableHead>
+                  <TableHead className="text-xs bg-surface">Branch</TableHead>
+                  <TableHead className="text-xs bg-surface">Sub-segment</TableHead>
+                  <TableHead className="text-xs bg-surface text-right">
+                    <TableHeaderTip
+                      title="Probability of Default (12-Month PD)"
+                      tip="Calibrated likelihood that borrower defaults within 12 months. Calibrated via isotonic regression across 35+ banking, GST, and behavioral features."
+                    >
+                      PD (12m)
+                    </TableHeaderTip>
+                  </TableHead>
+                  <TableHead className="text-xs bg-surface">
+                    <TableHeaderTip
+                      title="Risk Grade (RG1–RG10)"
+                      tip="DRISHTI 10-tier rating grade aligned with RBI supervisory rating guidelines. RG1–RG3: Prime; RG4–RG6: Watch; RG7–RG10: High / Severe Stress (enters Watchlist Committee)."
+                    >
+                      Grade
+                    </TableHeaderTip>
+                  </TableHead>
+                  <TableHead className="text-xs bg-surface">
+                    <TableHeaderTip
+                      title="Ind AS 109 Asset Stage"
+                      tip="Stage 1: performing; provision for the next 12 months. Stage 2: risk has risen materially since sanction, or 30+ days overdue; provision for the loan's lifetime. Stage 3: impaired, 90+ days overdue."
+                    >
+                      Stage
+                    </TableHeaderTip>
+                  </TableHead>
+                  <TableHead className="text-xs bg-surface">
+                    <TableHeaderTip
+                      title="RAG Operational Status"
+                      tip="Red: Action within 24h (drawing power erosion, bounce spike). Amber: Weekly covenant audit. Green: Clean standard servicing."
+                    >
+                      RAG
+                    </TableHeaderTip>
+                  </TableHead>
+                  <TableHead className="text-xs bg-surface">
+                    <TableHeaderTip
+                      title="RBI SMA status and model early watch"
+                      tip="Top line: RBI Special Mention Account status, from days past due only (Standard 0, SMA-0 1–30, SMA-1 31–60, SMA-2 61–90, NPA >90). Bottom line: the model's early-watch bucket, from the 12-month PD — a forecast, not a regulatory status."
+                    >
+                      RBI SMA / watch
+                    </TableHeaderTip>
+                  </TableHead>
+                  <TableHead className="text-xs bg-surface text-right">
+                    <TableHeaderTip
+                      title="Exposure at Default (EAD)"
+                      tip="Expected outstanding at default: drawn balance plus the share of the undrawn limit expected to be drawn before default."
+                    >
+                      EAD
+                    </TableHeaderTip>
+                  </TableHead>
+                  <TableHead className="text-xs bg-surface text-right">
+                    <TableHeaderTip
+                      title="Expected Credit Loss (ECL)"
+                      tip="Expected credit loss, staged: Stage 1 = 12-month PD × LGD × EAD; Stage 2 = lifetime PD × LGD × EAD; Stage 3 = credit-impaired, with the RBI provisioning floor applied. Indicative only; not a statutory provision."
+                    >
+                      ECL
+                    </TableHeaderTip>
+                  </TableHead>
+                  <TableHead className="text-xs bg-surface text-right pr-4">
+                    <TableHeaderTip
+                      title="Credit Action / CAM Dossier"
+                      tip="Jump to full Credit Assessment Memorandum (CAM) with the reasons behind the score, early-warning signals and what would bring the grade down."
+                      side="left"
+                    >
+                      Action
+                    </TableHeaderTip>
+                  </TableHead>
+                </TableRow>
+              )}
             </TableHeader>
             <TableBody>
               {filtered.slice(0, 200).map((b) => (
-                <BorrowerRow key={b.loan_id} b={b} />
+                <BorrowerRow key={b.loan_id} b={b} viewMode={viewMode} />
               ))}
               {filtered.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={13} className="py-8 text-center text-xs text-muted-foreground">
+                  <TableCell colSpan={viewMode === "compact" ? 7 : 13} className="py-8 text-center text-xs text-muted-foreground">
                     No borrowers match the current filters.
                   </TableCell>
                 </TableRow>
@@ -1024,40 +1160,61 @@ function PortfolioConsole() {
   );
 }
 
-function BorrowerRow({ b }: { b: BorrowerScore }) {
+function BorrowerRow({ b, viewMode = "standard" }: { b: BorrowerScore; viewMode?: "standard" | "compact" }) {
   const [copied, setCopied] = useState(false);
-  const [reviewed, setReviewed] = useState(false);
-  const [sarbEscalated, setSarbEscalated] = useState(false);
-
+  const { user } = useRole();
+  const rights = useDecisionRights(b.branch_code);
+  const reviewer = user?.employeeId ? `${user.employeeId} (${user.name})` : user?.name || "UNIDENTIFIED_OFFICER";
+  // One review status per account. The server value wins; with no API, the
+  // latest decision kept on this browser (createDecision's offline record) fills in.
+  const [status, setStatus] = useState<BorrowerScore["reviewed_status"]>(b.reviewed_status);
   useEffect(() => {
-    try {
-      const reviewedLoans = JSON.parse(localStorage.getItem("drishti_reviewed_loans") || "[]");
-      setReviewed(reviewedLoans.includes(b.loan_id));
-      const sarbLoans = JSON.parse(localStorage.getItem("drishti_sarb_loans") || "[]");
-      setSarbEscalated(sarbLoans.includes(b.loan_id));
-    } catch {
-      // ignore
-    }
-  }, [b.loan_id]);
+    const local = localReviewStatus(b.loan_id);
+    setStatus(b.reviewed_status && b.reviewed_status !== "PENDING" ? b.reviewed_status : local ?? b.reviewed_status);
+  }, [b.loan_id, b.reviewed_status]);
+  const reviewed = status === "REVIEWED";
+  const sarbEscalated = status === "FLAGGED_SARB";
+  const restructured = status === "RESTRUCTURE";
+  const deferred = status === "DEFERRED";
+  const committeeHold = sarbEscalated || restructured || deferred;
 
-  const handleToggleReviewed = (e: React.MouseEvent) => {
+  // The row tick is a quick "accept" decision: it goes through the same
+  // /decisions path as the committee dialog, so it lands in the audit trail.
+  // It cannot undo or overwrite a committee outcome; that needs the borrower page.
+  const handleToggleReviewed = async (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    try {
-      const current = JSON.parse(localStorage.getItem("drishti_reviewed_loans") || "[]");
-      const next = current.includes(b.loan_id)
-        ? current.filter((id: string) => id !== b.loan_id)
-        : [...current, b.loan_id];
-      localStorage.setItem("drishti_reviewed_loans", JSON.stringify(next));
-      setReviewed(!reviewed);
-      if (!reviewed) {
-        toast.success(`Marked ${b.loan_id} as Reviewed today`, { duration: 1800 });
-      } else {
-        toast.info(`Unmarked ${b.loan_id}`, { duration: 1200 });
-      }
-    } catch {
-      toast.error("Failed to update status");
+    if (!rights.canDecide) {
+      toast.info(rights.reason ?? "Review only", { duration: 2500 });
+      return;
     }
+    if (reviewed || committeeHold) {
+      toast.info(`Open ${b.loan_id} to change its decision`, { duration: 1800 });
+      return;
+    }
+    const res = await createDecision({
+      loan_id: b.loan_id,
+      segment: b.segment,
+      decision: "accept",
+      proposed_action: b.action,
+      proposed_sma: b.sma_status,
+      pd: b.pd,
+      risk_grade: b.risk_grade,
+      rationale: "Quick review from the portfolio queue: model grade accepted.",
+      decided_by: reviewer,
+      officer: reviewer,
+    });
+    if (!res) {
+      toast.error(`Review of ${b.loan_id} not saved`);
+      return;
+    }
+    setStatus("REVIEWED");
+    toast.success(
+      res === "persisted"
+        ? `${b.loan_id} reviewed — logged to the audit trail`
+        : `${b.loan_id} reviewed — saved on this browser only (API not reachable)`,
+      { duration: 2000 },
+    );
   };
 
   const handleCopyBriefing = (e: React.MouseEvent) => {
@@ -1081,47 +1238,175 @@ function BorrowerRow({ b }: { b: BorrowerScore }) {
     }
   };
 
+  const loanBadgeDetails = (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      <Link
+        to="/borrowers/$id"
+        params={{ id: b.loan_id }}
+        viewTransition
+        className="hover:text-primary hover:underline font-mono"
+      >
+        {b.loan_id}
+      </Link>
+      <button
+        type="button"
+        onClick={handleCopy}
+        title={copied ? "Copied!" : `Copy ${b.loan_id}`}
+        aria-label={`Copy loan ID ${b.loan_id}`}
+        className="group/copy inline-flex h-5 w-5 items-center justify-center rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+      >
+        {copied ? (
+          <Check className="h-3 w-3 text-emerald-600 animate-in zoom-in-50" />
+        ) : (
+          <Copy className="h-3 w-3 opacity-60 group-hover/copy:opacity-100 transition-opacity" />
+        )}
+      </button>
+      {reviewed && (
+        <Badge variant="outline" className="text-[11px] px-1 py-0 h-4 border-emerald-500/40 text-emerald-600 bg-emerald-500/10 font-medium">
+          ✓ Reviewed
+        </Badge>
+      )}
+      {sarbEscalated && (
+        <Badge variant="outline" className="text-[11px] px-1 py-0 h-4 border-rose-500/40 text-rose-600 bg-rose-500/10 font-medium">
+          ⚠️ SARB
+        </Badge>
+      )}
+      {restructured && (
+        <Badge variant="outline" className="text-[11px] px-1 py-0 h-4 border-amber-500/40 text-amber-600 bg-amber-500/10 font-medium">
+          📋 Restructuring review
+        </Badge>
+      )}
+      {deferred && (
+        <Badge variant="outline" className="text-[11px] px-1 py-0 h-4 border-sky-500/40 text-sky-600 bg-sky-500/10 font-medium">
+          ⏸ Deferred
+        </Badge>
+      )}
+      {b.segment === "msme_idbi" && (
+        <Badge variant="outline" className="text-[11px] px-1 py-0 h-4 border-primary/40 text-primary font-normal">
+          IDBI
+        </Badge>
+      )}
+    </div>
+  );
+
+  // One plain sentence for any account not in the Green band.
+  const whyLine =
+    b.rag !== "Green" ? (
+      <div className="mt-0.5 max-w-xs truncate text-[11px] text-muted-foreground" title={whyFlaggedLine(b, 5)}>
+        Why: {whyFlaggedLine(b)}
+      </div>
+    ) : null;
+
+  const actionButtons = (
+    <div className="flex items-center justify-end gap-1">
+      <button
+        type="button"
+        onClick={handleToggleReviewed}
+        title={
+          reviewed || committeeHold
+            ? "Decision recorded; open the account to change it"
+            : "Quick review: accept the model grade (logged to the audit trail)"
+        }
+        className={cn(
+          "inline-flex h-6 w-6 items-center justify-center rounded border transition-colors cursor-pointer",
+          reviewed
+            ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-600"
+            : "border-border/70 bg-background/80 text-muted-foreground hover:text-foreground hover:bg-muted"
+        )}
+      >
+        <CheckCheck className="h-3.5 w-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={handleCopyBriefing}
+        title="Copy standardized Credit Briefing for committee notes"
+        className="inline-flex h-6 w-6 items-center justify-center rounded border border-border/70 bg-background/80 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+      >
+        <Share2 className="h-3 w-3" />
+      </button>
+      <Link
+        to="/borrowers/$id"
+        params={{ id: b.loan_id }}
+        className="inline-flex items-center gap-1 rounded border border-border/70 bg-background/80 px-2 py-0.5 text-[11px] font-medium text-foreground hover:bg-primary/10 hover:text-primary transition-colors"
+        title="Open full Credit Appraisal Memorandum"
+      >
+        <FileText className="h-3 w-3" />
+        <span>CAM</span>
+      </Link>
+    </div>
+  );
+
+  if (viewMode === "compact") {
+    return (
+      <TableRow className="cursor-pointer transition-colors hover:bg-muted/60">
+        <TableCell className="text-xs font-medium pl-4">
+          <div className="space-y-1">
+            {loanBadgeDetails}
+            {whyLine}
+            <div className="text-[11px] text-muted-foreground capitalize">
+              {(b.sector ?? "—").replace(/_/g, " ")} {b.sub_segment ? `· ${b.sub_segment}` : ""}
+            </div>
+          </div>
+        </TableCell>
+        <TableCell className="text-xs">
+          <div className="text-foreground truncate max-w-36" title={b.branch_name}>
+            {b.branch_name ?? "—"}
+          </div>
+          <div className="text-[11px] text-muted-foreground">State: {b.state ?? "—"}</div>
+        </TableCell>
+        <TableCell className="text-xs text-right tabular-nums">
+          <div className="font-semibold">{formatInrCompact(b.ead)}</div>
+          <div className="text-[11px] text-muted-foreground">ECL: {formatInrCompact(b.ecl)}</div>
+        </TableCell>
+        <TableCell className="text-xs text-right tabular-nums">
+          <Badge variant="outline" className={`${pdTone(b.pd)} font-normal tabular-nums`}>
+            {formatPercent(b.pd, 1)}
+          </Badge>
+        </TableCell>
+        <TableCell className="text-xs">
+          <div className="font-semibold">
+            {b.risk_grade}
+            {b.committee_grade && (
+              <span className="ml-1 text-amber-600 dark:text-amber-400" title="Committee override; the model grade is shown first">
+                → {b.committee_grade}
+              </span>
+            )}
+          </div>
+          <div className="text-[11px] text-muted-foreground">
+            {rbiSma(dpdOf(b)) ?? "—"} · {watchLabel(b.sma_status)}
+          </div>
+        </TableCell>
+        <TableCell className="text-xs">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <Badge
+              variant="outline"
+              className={`font-normal text-[11px] px-1 py-0 whitespace-nowrap ${
+                (b.ecl_stage ?? 1) === 1
+                  ? "bg-band-a/10 text-band-a border-band-a/30"
+                  : (b.ecl_stage ?? 1) === 2
+                  ? "bg-band-c/10 text-band-c border-band-c/30"
+                  : "bg-band-d/10 text-band-d border-band-d/30"
+              }`}
+            >
+              Stage {b.ecl_stage ?? 1}
+            </Badge>
+            <Badge variant="outline" className={`${ragTone[b.rag]} font-normal text-[11px] px-1 py-0`}>
+              {b.rag}
+            </Badge>
+          </div>
+        </TableCell>
+        <TableCell className="text-xs text-right pr-4">
+          {actionButtons}
+        </TableCell>
+      </TableRow>
+    );
+  }
+
   return (
     <TableRow className="cursor-pointer transition-colors hover:bg-muted/60">
       <TableCell className="text-xs font-medium pl-4">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <Link
-            to="/borrowers/$id"
-            params={{ id: b.loan_id }}
-            viewTransition
-            className="hover:text-primary hover:underline font-mono"
-          >
-            {b.loan_id}
-          </Link>
-          <button
-            type="button"
-            onClick={handleCopy}
-            title={copied ? "Copied!" : `Copy ${b.loan_id}`}
-            aria-label={`Copy loan ID ${b.loan_id}`}
-            className="group/copy inline-flex h-5 w-5 items-center justify-center rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
-          >
-            {copied ? (
-              <Check className="h-3 w-3 text-emerald-600 animate-in zoom-in-50" />
-            ) : (
-              <Copy className="h-3 w-3 opacity-60 group-hover/copy:opacity-100 transition-opacity" />
-            )}
-          </button>
-          {reviewed && (
-            <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-emerald-500/40 text-emerald-600 bg-emerald-500/10 font-medium">
-              ✓ Reviewed
-            </Badge>
-          )}
-          {sarbEscalated && (
-            <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-rose-500/40 text-rose-600 bg-rose-500/10 font-medium">
-              ⚠️ SARB
-            </Badge>
-          )}
-          {b.segment === "msme_idbi" && (
-            <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-primary/40 text-primary font-normal">
-              IDBI
-            </Badge>
-          )}
-        </div>
+        {loanBadgeDetails}
+        {whyLine}
       </TableCell>
       <TableCell className="text-xs capitalize">{(b.sector ?? "—").replace(/_/g, " ")}</TableCell>
       <TableCell className="text-xs">{b.state ?? "—"}</TableCell>
@@ -1134,11 +1419,18 @@ function BorrowerRow({ b }: { b: BorrowerScore }) {
           {formatPercent(b.pd, 1)}
         </Badge>
       </TableCell>
-      <TableCell className="text-xs font-medium">{b.risk_grade}</TableCell>
+      <TableCell className="text-xs font-medium">
+        {b.risk_grade}
+        {b.committee_grade && (
+          <span className="ml-1 text-amber-600 dark:text-amber-400" title="Committee override; the model grade is shown first">
+            → {b.committee_grade}
+          </span>
+        )}
+      </TableCell>
       <TableCell className="text-xs">
         <Badge
           variant="outline"
-          className={`font-normal text-[10px] px-1.5 py-0 ${
+          className={`font-normal text-[11px] px-1.5 py-0 whitespace-nowrap ${
             (b.ecl_stage ?? 1) === 1
               ? "bg-band-a/10 text-band-a border-band-a/30"
               : (b.ecl_stage ?? 1) === 2
@@ -1154,44 +1446,17 @@ function BorrowerRow({ b }: { b: BorrowerScore }) {
           {b.rag}
         </Badge>
       </TableCell>
-      <TableCell className="max-w-40 truncate text-xs text-muted-foreground" title={b.action}>
-        {b.sma_status}
+      <TableCell className="text-xs whitespace-nowrap" title={b.action}>
+        <div className="font-medium">
+          {rbiSma(dpdOf(b)) ?? "—"}
+          {(dpdOf(b) ?? 0) > 0 && <span className="text-muted-foreground font-normal"> · {dpdOf(b)}d</span>}
+        </div>
+        <div className="text-[11px] text-muted-foreground">{watchLabel(b.sma_status)}</div>
       </TableCell>
       <TableCell className="text-xs text-right tabular-nums">{formatInrCompact(b.ead)}</TableCell>
       <TableCell className="text-xs text-right tabular-nums">{formatInrCompact(b.ecl)}</TableCell>
       <TableCell className="text-xs text-right pr-4">
-        <div className="flex items-center justify-end gap-1">
-          <button
-            type="button"
-            onClick={handleToggleReviewed}
-            title={reviewed ? "Marked as reviewed today (Click to unmark)" : "Mark as reviewed today"}
-            className={cn(
-              "inline-flex h-6 w-6 items-center justify-center rounded border transition-colors cursor-pointer",
-              reviewed
-                ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-600"
-                : "border-border/70 bg-background/80 text-muted-foreground hover:text-foreground hover:bg-muted"
-            )}
-          >
-            <CheckCheck className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={handleCopyBriefing}
-            title="Copy standardized Credit Briefing for committee notes"
-            className="inline-flex h-6 w-6 items-center justify-center rounded border border-border/70 bg-background/80 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
-          >
-            <Share2 className="h-3 w-3" />
-          </button>
-          <Link
-            to="/borrowers/$id"
-            params={{ id: b.loan_id }}
-            className="inline-flex items-center gap-1 rounded border border-border/70 bg-background/80 px-2 py-0.5 text-[11px] font-medium text-foreground hover:bg-primary/10 hover:text-primary transition-colors"
-            title="Open full Credit Appraisal Memorandum"
-          >
-            <FileText className="h-3 w-3" />
-            <span>CAM</span>
-          </Link>
-        </div>
+        {actionButtons}
       </TableCell>
     </TableRow>
   );

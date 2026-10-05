@@ -1,4 +1,7 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
+import { useCapabilities, useRole, useScopeBranch } from "@/lib/role-context";
+import { rbiSma, watchLabel, whyFlaggedLine } from "@/lib/plain-language";
+import type { BorrowerScore } from "@/lib/types";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -43,7 +46,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useGuidedTips } from "@/components/drishti/guided-tips";
-import { createDecision, scoreRawBorrower, submitUnderwriting, fetchBorrower } from "@/lib/api";
+import { PageApiDrawer } from "@/components/drishti/page-api-drawer";
+import { createDecision, scoreRawBorrower, submitUnderwriting, fetchBorrower, getSnapshot, type RegulatoryOverlay } from "@/lib/api";
 import { formatInr, formatInrCompact, formatPercent, ragTone, pdTone } from "@/lib/format";
 import {
   Calculator,
@@ -68,6 +72,8 @@ import {
   Info,
   Copy,
   ArrowDown,
+  Workflow,
+  ExternalLink,
 } from "lucide-react";
 
 function HelpTip({ content, enabled = true }: { content: React.ReactNode; enabled?: boolean }) {
@@ -117,6 +123,10 @@ function ActionTooltip({
 }
 
 export const Route = createFileRoute("/underwrite")({
+  // ?id=<loan id> arrives from a borrower page's "Re-rate" link.
+  validateSearch: (search: Record<string, unknown>): { id?: string } => ({
+    id: search.id != null && search.id !== "" ? String(search.id) : undefined,
+  }),
   component: UnderwritePage,
 });
 
@@ -140,20 +150,121 @@ interface AppraisalResult {
   ews?: {
     signals?: Array<{ code: string; label: string; severity: string }>;
   };
+  regulatory_overlay?: RegulatoryOverlay | null;
+}
+
+// Real accounts from the book, one per verdict colour, picked from the bundled
+// snapshot at load time. Hand-written labels went stale whenever the book was
+// re-scored ("Early stress" ended up opening an RG9 / Red account), so the label
+// and tooltip are built from the account's own stored grade and fields.
+const RAG_GRADES: Record<"Green" | "Amber" | "Red", number[]> = {
+  Green: [1, 2, 3, 4],
+  Amber: [5, 6, 7],
+  Red: [8, 9, 10],
+};
+
+function pickSampleAccounts(branchCode?: string): Array<{ id: string; label: string; tip: string }> {
+  const book = getSnapshot().borrowers.filter(
+    (b) => b.segment === "msme_idbi" && (!branchCode || b.branch_code === branchCode),
+  );
+  const out: Array<{ id: string; label: string; tip: string }> = [];
+  for (const rag of ["Green", "Amber", "Red"] as const) {
+    const pool = book.filter((b) => b.rag === rag);
+    // Prefer accounts whose colour comes from the model grade rather than a DPD escalation.
+    const byGrade = pool.filter((b) => RAG_GRADES[rag].includes(parseInt(b.risk_grade.replace(/\D/g, ""), 10)));
+    const candidates = (byGrade.length ? byGrade : pool).slice().sort((x, y) => x.pd - y.pd);
+    const acct = candidates[Math.floor(candidates.length / 2)];
+    if (!acct) continue;
+    const raw = (acct.raw ?? {}) as Record<string, number | string | undefined>;
+    const sector = String(acct.sector ?? "msme").replace(/_/g, " ");
+    const facts = [
+      `${formatInrCompact(Number(raw.sanction_limit ?? acct.ead ?? 0))} limit`,
+      raw.cibil_score != null ? `CIBIL ${raw.cibil_score}` : null,
+      raw.drawing_power_gap_pct != null ? `drawing power ${raw.drawing_power_gap_pct}% below limit` : null,
+      raw.demanded_vs_collected_ratio != null
+        ? `${Math.round(Number(raw.demanded_vs_collected_ratio) * 100)}% of dues collected`
+        : null,
+      `${Number(raw.dpd ?? 0)} days overdue`,
+    ].filter(Boolean);
+    out.push({
+      id: acct.loan_id,
+      label: `${sector.replace(/\b\w/g, (c) => c.toUpperCase())} · ${acct.risk_grade} ${rag}`,
+      tip: `${facts.join(", ")}. Stored verdict: ${acct.risk_grade} / ${rag}, PD ${formatPercent(acct.pd, 1)}. Click to load it and re-run the appraisal.`,
+    });
+  }
+  return out;
+}
+
+const SAMPLE_ACCOUNTS = pickSampleAccounts();
+
+// The sectors the model was trained on. A value outside this list is an unseen
+// category to the model, and a fetched account's sector would show blank here.
+const SECTORS: Array<[string, string]> = [
+  ["agri_processing", "Agri Processing"],
+  ["auto_components", "Auto Components"],
+  ["construction", "Construction"],
+  ["food_processing", "Agro & Food Processing"],
+  ["hospitality", "Hospitality"],
+  ["it_services", "IT Services"],
+  ["pharma", "Pharma & Chemicals"],
+  ["retail_trade", "Retail & Wholesale"],
+  ["textiles", "Textiles & Garments"],
+  ["transport", "Transport & Logistics"],
+];
+
+function newProposalId(): string {
+  const d = new Date();
+  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+  return `IDBI-APP-${ymd}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 }
 
 export function UnderwritePage() {
+  const caps = useCapabilities();
+  if (!caps.canDecide) {
+    return (
+      <div className="p-4 md:p-6">
+        <Card className="mx-auto max-w-xl bg-surface">
+          <CardHeader>
+            <CardTitle className="text-base">Loan appraisal is a controlling-office desk</CardTitle>
+            <CardDescription className="text-xs">{caps.readOnlyReason}</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2 text-xs">
+            <Button asChild size="sm" variant="outline">
+              <Link to="/governance">Review the decision audit trail</Link>
+            </Button>
+            <Button asChild size="sm" variant="outline">
+              <Link to="/">Open the portfolio (read-only)</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+  return <UnderwriteDesk />;
+}
+
+function UnderwriteDesk() {
   const [segment, setSegment] = useState<"msme_idbi" | "msme_india">("msme_idbi");
-  const [loanId, setLoanId] = useState("IDBI-APP-2026-0042");
+  // A new proposal gets its own ID; fetching an account switches to re-rating
+  // that account. A fixed default ID used to make every proposal overwrite the last.
+  const [loanId, setLoanId] = useState(newProposalId);
+  const [appraisalMode, setAppraisalMode] = useState<"new" | "rerate">("new");
   const [sanctionLimit, setSanctionLimit] = useState(2500000);
   const [drawingPower, setDrawingPower] = useState(2500000);
   const [cibilScore, setCibilScore] = useState(740);
   const [demandedRatio, setDemandedRatio] = useState(0.98);
+  const [amountMode, setAmountMode] = useState<"amounts" | "ratio">("amounts");
+  const [demandedAmt, setDemandedAmt] = useState<number>(300000);
+  const [collectedAmt, setCollectedAmt] = useState<number>(294000);
+  const [restructuringMoratorium, setRestructuringMoratorium] = useState("6m");
+  const [restructuringFitl, setRestructuringFitl] = useState(true);
+  const [restructuringMarginInfusion, setRestructuringMarginInfusion] = useState("15");
+  const [restructuringTevAgency, setRestructuringTevAgency] = useState("IDBI In-House Technical Appraisal Cell");
   const [dpd, setDpd] = useState(0);
   const [emiBounces, setEmiBounces] = useState(0);
   const [lienFlag, setLienFlag] = useState(0);
   const [restructuringFlag, setRestructuringFlag] = useState(0);
-  const [sector, setSector] = useState("auto_ancillary");
+  const [sector, setSector] = useState("auto_components");
   const [subSegment, setSubSegment] = useState("small");
   const [state, setState] = useState("MH");
   const [gstDelay, setGstDelay] = useState(4);
@@ -197,6 +308,20 @@ export function UnderwritePage() {
     }
   };
 
+  const handleDemandedAmtChange = (val: number) => {
+    const dVal = Math.max(1, val);
+    setDemandedAmt(dVal);
+    const r = Math.min(1.0, Math.max(0, collectedAmt / dVal));
+    setDemandedRatio(Math.round(r * 1000) / 1000);
+  };
+
+  const handleCollectedAmtChange = (val: number) => {
+    const cVal = Math.max(0, val);
+    setCollectedAmt(cVal);
+    const r = demandedAmt > 0 ? Math.min(1.0, Math.max(0, cVal / demandedAmt)) : 1.0;
+    setDemandedRatio(Math.round(r * 1000) / 1000);
+  };
+
   // Results & submission state
   const [isScoring, setIsScoring] = useState(false);
   const [result, setResult] = useState<AppraisalResult | null>(null);
@@ -205,18 +330,29 @@ export function UnderwritePage() {
   const [scoredOffline, setScoredOffline] = useState(false);
   const [scoreError, setScoreError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
-  const [decisionType, setDecisionType] = useState<"accept" | "override" | "defer" | "reject">("accept");
+  const [decisionType, setDecisionType] = useState<"accept" | "override" | "defer" | "reject" | "restructure">("accept");
   const [revisedGrade, setRevisedGrade] = useState("RG3");
   const [rationale, setRationale] = useState("");
-  const [officerId, setOfficerId] = useState("APPRAISAL_OFFICER_07");
+  const { user } = useRole();
+  const scopeBranch = useScopeBranch();
+  // A branch officer's quick accounts come from their own branch.
+  const sampleAccounts = useMemo(
+    () => (scopeBranch ? pickSampleAccounts(scopeBranch) : SAMPLE_ACCOUNTS),
+    [scopeBranch],
+  );
+  // Decisions are attributed to the signed-in officer, not to a free-text field.
+  const officerId = user?.employeeId ? `${user.employeeId} (${user.name})` : user?.name || "UNIDENTIFIED_OFFICER";
   const [decisionFeedback, setDecisionFeedback] = useState<string | null>(null);
+  const [submittedId, setSubmittedId] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const scoreSeq = useRef(0);
 
   const handleCopyVerdict = async () => {
     if (!result) return;
     const summaryText = `[DRISHTI APPRAISAL VERDICT]
 Facility Ref: ${loanId}
 Risk Grade: ${result.risk_grade} | 12M Calibrated PD: ${formatPercent(result.pd_12m, 2)}
-RAG Status: ${result.rag} | Watch Category: ${result.sma_watch}
+RAG Status: ${result.rag} | RBI SMA: ${rbiSma(dpd) ?? "n/a"} | Model watch: ${watchLabel(result.sma_watch)}
 Ind AS 109: Stage ${result.ecl_stage ?? 1} | Expected Credit Loss (ECL): ${formatInr(result.ecl ?? 0)}
 Prescribed Action: ${result.recommended_action} (Cadence: ${result.review_cadence}, Owner: ${result.action_owner})
 Underwriting Timestamp: ${new Date().toLocaleString()}`;
@@ -289,13 +425,26 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
       state: sState,
       gst_filing_delay_days: gDelay,
       itc_mismatch_flag: iMismatch,
-      cashflow_volatility: Math.min(0.8, 0.15 + (gap / 100) * 0.5),
-      balance_trend_pct: (dRatio - 1.0) * 100,
     };
+    // cashflow_volatility / balance_trend_pct are derived by the model's own
+    // feature step (and by the offline scorer) exactly as in training.
 
+    // Auto-score fires on every edit; only the latest request may set the verdict.
+    const seq = ++scoreSeq.current;
     const res = await scoreRawBorrower(seg, payload);
+    if (seq !== scoreSeq.current) return;
     setIsScoring(false);
+    if (res?.status === "insufficient_data" || res?.status === "error") {
+      // Clear the previous verdict so it cannot be submitted against new inputs.
+      setResult(null);
+      setScoreError(
+        res.message ||
+          "DRISHTI refused to score: too few of the model's input families were supplied for a reliable PD.",
+      );
+      return;
+    }
     if (!res || res.pd_12m == null) {
+      setResult(null);
       setScoreError(
         "Could not produce a verdict for these inputs. Check the facility parameters and run the appraisal again.",
       );
@@ -316,6 +465,7 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
         ecl_stage: res.ecl_stage || 1,
         reason_codes: res.reason_codes,
         ews: res.ews,
+        regulatory_overlay: res.regulatory_overlay,
       });
       if (autoScroll) {
         scrollToVerdict();
@@ -330,8 +480,26 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
     setFetchFeedback(null);
     try {
       const b = await fetchBorrower(idToFetch);
+      if (b && b.segment !== "msme_idbi") {
+        // The form carries the IDBI Finacle fields only; re-rating an India-book
+        // account here would score it without its GST / vintage inputs and then
+        // overwrite them.
+        setFetchFeedback({
+          msg: `${b.loan_id} is in the ${b.segment} book, which this form cannot re-rate without losing its inputs. Open its borrower page instead.`,
+          type: "error",
+        });
+        return;
+      }
+      if (b && scopeBranch && b.branch_code !== scopeBranch) {
+        setFetchFeedback({
+          msg: `${b.loan_id} belongs to ${b.branch_name ?? `branch ${b.branch_code}`}, not your branch (${scopeBranch}). Its own branch or the controlling office re-rates it.`,
+          type: "error",
+        });
+        return;
+      }
       if (b) {
         setLoanId(b.loan_id);
+        setAppraisalMode("rerate");
         const limit = b.ead || 2500000;
         setSanctionLimit(limit);
         const raw = (b.raw || {}) as Record<string, any>;
@@ -341,9 +509,18 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
         setCibilScore(cibil);
         const dem = Number(raw.demanded_vs_collected_ratio ?? 0.98);
         setDemandedRatio(dem);
+        const dAmt = Math.round(limit * 0.12);
+        const cAmt = Math.round(dAmt * dem);
+        setDemandedAmt(dAmt);
+        setCollectedAmt(cAmt);
         const d = Number(raw.dpd ?? 0);
         setDpd(d);
-        const emi = Number(raw.emi_bounce_6m ?? 0);
+        // When the record has no bounce count, use the model's own fill-in
+        // (engineer_idbi_features: from the collection ratio). Defaulting to 0
+        // scored the same account lower here than on its borrower page.
+        const emi = Number(
+          raw.emi_bounce_6m ?? (dem < 0.7 ? 3 : dem < 0.85 ? 2 : dem < 0.95 ? 1 : 0),
+        );
         setEmiBounces(emi);
         const lien = Number(raw.lien_flag ?? 0);
         setLienFlag(lien);
@@ -355,14 +532,14 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
         if (b.sub_segment) setSubSegment(b.sub_segment);
         const st = b.state || state;
         if (b.state) setState(b.state);
-        const gst = Number(raw.gst_filing_delay_days ?? 4);
+        const gst = Number(raw.gst_filing_delay_days ?? 0);
         setGstDelay(gst);
         const itc = Number(raw.itc_mismatch_flag ?? 0);
         setItcMismatch(itc);
         const seg = b.segment === "msme_india" ? "msme_india" : "msme_idbi";
         setSegment(seg);
         setFetchFeedback({
-          msg: `Fetched Finacle CBS account ${b.loan_id} (${b.branch_name || "Branch 1019"}) — 14 parameters auto-populated.`,
+          msg: `Loaded ${b.loan_id} (${b.branch_name || "branch not recorded"}) from the demo book for re-rating. In the bank this fetch would call the CBS APIs (402, 404, 391, 441, 362).`,
           type: "success",
         });
 
@@ -388,7 +565,7 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
         );
       } else {
         setFetchFeedback({
-          msg: `Account ID "${idToFetch}" not found in Finacle CBS database.`,
+          msg: `Account "${idToFetch}" is not in the demo book.`,
           type: "error",
         });
       }
@@ -399,11 +576,16 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
       });
     } finally {
       setIsFetchingFinacle(false);
-      setTimeout(() => setFetchFeedback(null), 4000);
+      // Success notes fade; an error stays until the next fetch so it can be read.
+      setTimeout(() => setFetchFeedback((f) => (f?.type === "success" ? null : f)), 4000);
     }
   };
 
   const applyPreset = async (preset: "prime" | "early_stress" | "distressed", autoScroll = false) => {
+    // A preset is a hypothetical proposal, never an edit of a fetched account.
+    setLoanId(newProposalId());
+    setAppraisalMode("new");
+    setFetchFeedback(null);
     let limit = 2500000;
     let dp = 2500000;
     let cibil = 770;
@@ -428,7 +610,10 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
       itc = 0;
     } else if (preset === "early_stress") {
       limit = 2500000;
-      dp = 1800000;
+      // 12% drawing-power gap. At 28% the model already reads RG10 / Red: it is
+      // very steep in this feature on the synthetic data, so a 28% gap is not
+      // "early" stress for it.
+      dp = 2200000;
       cibil = 645;
       dem = 0.85;
       d = 25;
@@ -454,6 +639,10 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
     setDrawingPower(dp);
     setCibilScore(cibil);
     setDemandedRatio(dem);
+    const dAmt = Math.round(limit * 0.12);
+    const cAmt = Math.round(dAmt * dem);
+    setDemandedAmt(dAmt);
+    setCollectedAmt(cAmt);
     setDpd(d);
     setEmiBounces(emi);
     setLienFlag(lien);
@@ -483,6 +672,14 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
     Math.round(((sanctionLimit - drawingPower) / Math.max(1, sanctionLimit)) * 100 * 10) / 10,
   );
 
+  const { id: deepLinkId } = Route.useSearch();
+  useEffect(() => {
+    if (!deepLinkId) return;
+    setFinacleLookupId(deepLinkId);
+    handleFinacleFetch(deepLinkId, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkId]);
+
   const handleScore = async (autoScroll = false) => {
     await executeScore(undefined, autoScroll);
   };
@@ -510,6 +707,16 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
   ]);
 
   const handleLogDecision = async () => {
+    if (!result || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      await logDecision();
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const logDecision = async () => {
     if (!result) return;
     const res = await submitUnderwriting({
       loan_id: loanId,
@@ -527,21 +734,34 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
       sector: sector,
       sub_segment: subSegment,
       state: state,
-      branch_code: "1019",
+      mode: appraisalMode,
+      // A branch officer's new proposal is booked to their branch.
+      branch_code: scopeBranch,
       decision: decisionType,
       revised_grade: decisionType === "override" ? revisedGrade : undefined,
-      override_action: decisionType === "override" ? `Override to ${revisedGrade}` : undefined,
-      rationale: rationale.trim() || `Underwriting appraisal decision logged by ${officerId}`,
+      override_action: decisionType === "override"
+        ? `Override to ${revisedGrade}`
+        : decisionType === "restructure"
+        ? `MSME Restructuring: Moratorium ${restructuringMoratorium}, FITL ${restructuringFitl ? "Yes" : "No"}, Margin ${restructuringMarginInfusion}% (${restructuringTevAgency})`
+        : undefined,
+      rationale: decisionType === "restructure"
+        ? `[RBI MSME RESTRUCTURING & TEV STUDY] Moratorium: ${restructuringMoratorium} | FITL: ${restructuringFitl ? "Approved" : "None"} | Promoter Margin: +${restructuringMarginInfusion}% | Agency: ${restructuringTevAgency}. ${rationale.trim()}`
+        : (rationale.trim() || `Underwriting appraisal decision logged by ${officerId}`),
       officer: officerId,
       role: "Branch Credit Appraisal Officer",
     });
 
+    if (res && res.status === "conflict") {
+      setDecisionFeedback(res.detail || "This loan ID is already in the book. Fetch it to re-rate it.");
+      return;
+    }
     if (res && res.status === "success") {
-      setDecisionFeedback("Proposal appraisal & decision successfully persisted to master portfolio and HITL audit log.");
-      setTimeout(() => {
-        setModalOpen(false);
-        setDecisionFeedback(null);
-      }, 1200);
+      setDecisionFeedback(
+        appraisalMode === "rerate"
+          ? `Re-rating of ${loanId} saved to the loan record and the audit trail.`
+          : `Proposal ${loanId} added to the portfolio and the audit trail.`,
+      );
+      setSubmittedId(loanId);
       return;
     }
 
@@ -555,21 +775,27 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
       risk_grade: result.risk_grade,
       original_grade: result.risk_grade,
       revised_grade: decisionType === "override" ? revisedGrade : undefined,
-      override_action: decisionType === "override" ? `Override to ${revisedGrade}` : undefined,
-      rationale: rationale.trim() || `Underwriting appraisal decision logged by ${officerId}`,
+      override_action: decisionType === "override"
+        ? `Override to ${revisedGrade}`
+        : decisionType === "restructure"
+        ? `MSME Restructuring: Moratorium ${restructuringMoratorium}, FITL ${restructuringFitl ? "Yes" : "No"}, Margin ${restructuringMarginInfusion}%`
+        : undefined,
+      rationale: decisionType === "restructure"
+        ? `[RBI MSME RESTRUCTURING & TEV STUDY] Moratorium: ${restructuringMoratorium} | FITL: ${restructuringFitl ? "Approved" : "None"} | Promoter Margin: +${restructuringMarginInfusion}% | Agency: ${restructuringTevAgency}. ${rationale.trim()}`
+        : (rationale.trim() || `Underwriting appraisal decision logged by ${officerId}`),
       decided_by: officerId,
       officer: officerId,
       role: "Branch Credit Appraisal Officer",
     });
 
     if (ok) {
-      setDecisionFeedback("Decision successfully persisted to HITL audit log.");
-      setTimeout(() => {
-        setModalOpen(false);
-        setDecisionFeedback(null);
-      }, 1200);
+      setDecisionFeedback(
+        ok === "persisted"
+          ? "Decision logged to the audit trail (proposal not added to the book)."
+          : "API not reachable: decision saved on this browser only and shown in the audit trail as local.",
+      );
     } else {
-      setDecisionFeedback("Error persisting decision to API database.");
+      setDecisionFeedback("Decision not saved: the API rejected it.");
     }
   };
 
@@ -579,18 +805,12 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
         {/* Header */}
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
-              Core Underwriting & Appraisal Simulator · Real-Time Decisioning
-            </div>
-            <h1 className="mt-1 text-xl font-semibold text-foreground">
+            <h1 className="text-xl font-semibold text-foreground">
               Single Borrower Credit Appraisal
             </h1>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              Test incoming MSME loan proposals or limit renewals against calibrated 12-month PD,
-              RBI Early Warning Signals, and Ind AS 109 provisions.
-            </p>
           </div>
-          <div className="flex items-center gap-2 no-print">
+          <div className="flex flex-wrap items-center gap-2 no-print">
+            <PageApiDrawer routePath="/underwrite" triggerLabel="Active Sandbox APIs" />
             <ActionTooltip
               enabled={guidedTips}
               content="Export or print formal Credit Appraisal Memo (CAM) formatted for Zonal Credit Committee review."
@@ -617,7 +837,7 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                     <DialogTitle>Submit Appraisal to Credit Committee</DialogTitle>
                     <DialogDescription className="text-xs">
                       Record this appraisal proposal for {loanId} ({result.risk_grade}, PD{" "}
-                      {formatPercent(result.pd_12m, 1)}) into the immutable audit database.
+                      {formatPercent(result.pd_12m, 1)}) into the audit log.
                     </DialogDescription>
                   </DialogHeader>
                   <div className="space-y-3 py-2 text-xs">
@@ -635,6 +855,7 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                           <SelectItem value="override">Sanction with Grade Override</SelectItem>
                           <SelectItem value="defer">Defer for Collateral / Field Inspection</SelectItem>
                           <SelectItem value="reject">Reject Loan Proposal</SelectItem>
+                          <SelectItem value="restructure">Refer for restructuring (viability study)</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -653,6 +874,67 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                         </Select>
                       </div>
                     )}
+                    {decisionType === "restructure" && (
+                      <div className="space-y-3 rounded-md border border-purple-500/30 bg-purple-50/40 dark:bg-purple-950/20 p-2.5">
+                        <div className="text-[11px] font-semibold text-purple-700 dark:text-purple-300 flex items-center gap-1.5">
+                          <FileText className="h-3.5 w-3.5" /> Restructuring with a viability study (TEV)
+                        </div>
+                        <div className="text-[11px] text-muted-foreground leading-normal">
+                          Corrective action under the RBI Framework for Revitalising and Rehabilitating MSMEs: a unit found viable in a Techno-Economic Viability (TEV) study can be restructured (moratorium, FITL) before recovery is considered. Asset classification follows the RBI rules in force; restructuring alone does not keep the account standard.
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div>
+                            <Label className="text-[11px] font-medium text-muted-foreground">Principal Moratorium</Label>
+                            <Select value={restructuringMoratorium} onValueChange={setRestructuringMoratorium}>
+                              <SelectTrigger className="mt-1 h-7 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="3m">3 Months</SelectItem>
+                                <SelectItem value="6m">6 Months</SelectItem>
+                                <SelectItem value="9m">9 Months</SelectItem>
+                                <SelectItem value="12m">12 Months</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Label className="text-[11px] font-medium text-muted-foreground">Promoter Margin Infusion</Label>
+                            <Select value={restructuringMarginInfusion} onValueChange={setRestructuringMarginInfusion}>
+                              <SelectTrigger className="mt-1 h-7 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="10">+10% Fresh Capital</SelectItem>
+                                <SelectItem value="15">+15% Fresh Capital</SelectItem>
+                                <SelectItem value="20">+20% Fresh Capital</SelectItem>
+                                <SelectItem value="25">+25% Fresh Capital</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[11px] font-medium text-muted-foreground">Techno-Economic Viability (TEV) Agency</Label>
+                          <Input
+                            value={restructuringTevAgency}
+                            onChange={(e) => setRestructuringTevAgency(e.target.value)}
+                            className="h-7 text-xs font-mono"
+                            placeholder="Empaneled TEV Consultant / IDBI Appraisal Cell"
+                          />
+                        </div>
+                        <div className="flex items-center justify-between text-xs pt-1 border-t border-purple-500/20">
+                          <span className="text-[11px] font-medium">Funded Interest Term Loan (FITL)</span>
+                          <label className="flex items-center gap-1.5 cursor-pointer text-[11px]">
+                            <input
+                              type="checkbox"
+                              checked={restructuringFitl}
+                              onChange={(e) => setRestructuringFitl(e.target.checked)}
+                              className="rounded border-input text-primary"
+                            />
+                            <span>Convert Overdue Interest</span>
+                          </label>
+                        </div>
+                      </div>
+                    )}
                     <div>
                       <Label className="text-xs font-medium">Appraisal Rationale / Mitigating Covenants</Label>
                       <Textarea
@@ -667,16 +949,38 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                       <Label className="text-xs font-medium">Appraisal Officer ID</Label>
                       <Input
                         value={officerId}
-                        onChange={(e) => setOfficerId(e.target.value)}
-                        className="mt-1 h-8 text-xs font-mono"
+                        readOnly
+                        className="mt-1 h-8 text-xs font-mono bg-muted"
                       />
                     </div>
                     {decisionFeedback && (
                       <div className="rounded bg-muted p-2 text-xs text-primary">{decisionFeedback}</div>
                     )}
-                    <Button onClick={handleLogDecision} className="w-full text-xs">
-                      Confirm & Persist to Audit Trail
-                    </Button>
+                    {submittedId ? (
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button asChild variant="outline" className="text-xs">
+                          <Link to="/borrowers/$id" params={{ id: submittedId }}>
+                            Open account
+                          </Link>
+                        </Button>
+                        <Button
+                          className="text-xs"
+                          onClick={() => {
+                            setModalOpen(false);
+                            setDecisionFeedback(null);
+                            setSubmittedId(null);
+                            setLoanId(newProposalId());
+                            setAppraisalMode("new");
+                          }}
+                        >
+                          New proposal
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button onClick={handleLogDecision} disabled={isSubmitting} className="w-full text-xs">
+                        {appraisalMode === "rerate" ? `Confirm re-rating of ${loanId}` : "Confirm & add proposal to the book"}
+                      </Button>
+                    )}
                   </div>
                 </DialogContent>
               </Dialog>
@@ -724,20 +1028,26 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
         <Card className="border-border/80 bg-surface shadow-sm no-print">
           <CardContent className="p-3.5 sm:p-4 space-y-3">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Database className="h-4 w-4 text-blue-600 shrink-0" />
-                <div>
-                  <span className="text-xs font-semibold text-foreground flex items-center">
-                    1-Click Finacle Core Banking Auto-Fill:
-                    <HelpTip
-                      enabled={guidedTips}
-                      content="Direct Core Banking System query: Ingests sanctioned facility limits, drawing power from stock registers, past 6-month cheque bounces, and overdue DPD without manual data re-entry."
-                    />
-                  </span>
-                  <span className="ml-1 text-[11px] text-muted-foreground hidden sm:inline">
-                    Pulls limits, DPD, DP, and bounces directly from Core Banking System
-                  </span>
-                </div>
+                <span className="text-xs font-semibold text-foreground">
+                  Finacle CBS Quick-Fetch
+                </span>
+                <Link
+                  to="/architecture"
+                  hash="api-matrix"
+                  className="hidden sm:inline-flex items-center gap-1 text-[11px] font-mono text-muted-foreground hover:text-primary transition-colors bg-muted/60 hover:bg-muted px-2 py-0.5 rounded border border-border/80"
+                  title="View IDBI Sandbox API Lineage Matrix"
+                >
+                  <Workflow className="h-3 w-3 text-primary" />
+                  <span>5 APIs: 402, 404, 391, 441, 362</span>
+                  <ExternalLink className="h-2.5 w-2.5 opacity-60" />
+                </Link>
+                <PageApiDrawer
+                  routePath="/underwrite"
+                  triggerLabel="CBS APIs"
+                  variant="pill"
+                />
               </div>
 
               {/* Quick Fetch Bar */}
@@ -788,57 +1098,24 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                   Quick CBS Accounts:
                   <HelpTip
                     enabled={guidedTips}
-                    content="Pre-loaded representative MSME borrowing accounts representing prime conduct, early warning stress, and recent loan renewals."
+                    content="One real account from the book per verdict colour (Green, Amber, Red), chosen from the current scores."
                   />
                 </span>
-                <ActionTooltip
-                  enabled={guidedTips}
-                  content="Prime Auto Ancillary Account: CIBIL 770, 0% DP erosion, 100% debt-service recovery, 0 DPD. Click to auto-fill and jump to appraisal verdict."
-                >
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    className="h-6 text-[11px] px-2 font-mono"
-                    onClick={() => {
-                      setFinacleLookupId("IDBI_LN_100361");
-                      handleFinacleFetch("IDBI_LN_100361", true);
-                    }}
-                  >
-                    IDBI_LN_100361 (Auto Ancillary · Prime)
-                  </Button>
-                </ActionTooltip>
-                <ActionTooltip
-                  enabled={guidedTips}
-                  content="Stressed Textile Account: CIBIL 645, 28% DP erosion gap, 25 DPD overdue, 2 EMI bounces. Click to auto-fill and jump to verdict."
-                >
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    className="h-6 text-[11px] px-2 font-mono"
-                    onClick={() => {
-                      setFinacleLookupId("IDBI_LN_100155");
-                      handleFinacleFetch("IDBI_LN_100155", true);
-                    }}
-                  >
-                    IDBI_LN_100155 (Textiles · Stressed)
-                  </Button>
-                </ActionTooltip>
-                <ActionTooltip
-                  enabled={guidedTips}
-                  content="Recent Facility Renewal: Working capital CC proposal undergoing annual review under FY26 RBI guidelines."
-                >
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    className="h-6 text-[11px] px-2 font-mono"
-                    onClick={() => {
-                      setFinacleLookupId("IDBI-TEST-FACILITY-999");
-                      handleFinacleFetch("IDBI-TEST-FACILITY-999", true);
-                    }}
-                  >
-                    IDBI-TEST-FACILITY-999 (Recent Renewal)
-                  </Button>
-                </ActionTooltip>
+                {sampleAccounts.map((acct) => (
+                  <ActionTooltip key={acct.id} enabled={guidedTips} content={acct.tip}>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="h-6 text-[11px] px-2 font-mono"
+                      onClick={() => {
+                        setFinacleLookupId(acct.id);
+                        handleFinacleFetch(acct.id, true);
+                      }}
+                    >
+                      {acct.id} ({acct.label})
+                    </Button>
+                  </ActionTooltip>
+                ))}
               </div>
 
               <div className="flex flex-wrap items-center gap-1.5">
@@ -864,7 +1141,7 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                 </ActionTooltip>
                 <ActionTooltip
                   enabled={guidedTips}
-                  content="SMA-0 Incipient Stress: Simulates 25 DPD, 2 EMI bounces, and 28% DP erosion gap."
+                  content="SMA-0 early stress: 25 days past due, 2 EMI bounces, drawing power 12% below the limit, CIBIL 645."
                 >
                   <Button
                     variant="outline"
@@ -911,15 +1188,22 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
         </Card>
 
         {/* Main Grid: Form Inputs vs Scoring Output */}
-        <div className="grid gap-6 lg:grid-cols-12">
+        <div className="grid gap-6 lg:grid-cols-12 [&>*]:min-w-0">
           {/* Input Form Column (7 cols) */}
           <div className="space-y-4 lg:col-span-7">
             <Card className="bg-surface">
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-semibold">1. Proposal & Facility Particulars</CardTitle>
-                <CardDescription className="text-xs">
-                  Finacle core banking facility limits, customer details, and sector.
-                </CardDescription>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <CardTitle className="text-sm font-semibold">1. Proposal & Facility Particulars</CardTitle>
+                  <div className="flex items-center gap-1.5">
+                    <Badge variant="outline" className="text-[11px] font-mono border-blue-500/30 text-blue-600 bg-blue-50/40 dark:bg-blue-950/40">
+                      CBS-04 · Facility
+                    </Badge>
+                    <Badge variant="outline" className="text-[11px] font-mono border-blue-500/30 text-blue-600 bg-blue-50/40 dark:bg-blue-950/40">
+                      CBS-03 · Limits
+                    </Badge>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent className="space-y-4 text-xs">
                 <div className="grid gap-3 sm:grid-cols-3">
@@ -935,7 +1219,7 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                       <button
                         type="button"
                         onClick={handleCopyLoanId}
-                        className="inline-flex items-center gap-1 text-[10px] text-primary hover:underline font-mono"
+                        className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline font-mono"
                         title="Copy Loan ID"
                       >
                         {copiedLoanId ? <Check className="h-2.5 w-2.5 text-emerald-500" /> : <Copy className="h-2.5 w-2.5" />}
@@ -944,7 +1228,10 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                     </div>
                     <Input
                       value={loanId}
-                      onChange={(e) => setLoanId(e.target.value)}
+                      onChange={(e) => {
+                        setLoanId(e.target.value);
+                        setAppraisalMode("new");
+                      }}
                       className="mt-1 h-8 font-mono text-xs"
                     />
                   </div>
@@ -1038,7 +1325,7 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                     <div className="mt-1 flex h-8 items-center rounded-md border border-input bg-muted px-2 font-mono text-xs font-semibold">
                       {dpGapPct}%
                       {dpGapPct >= 25 && (
-                        <span className="ml-auto text-[10px] text-rose-500 font-semibold">EWS18 Alert</span>
+                        <span className="ml-auto text-[11px] text-rose-500 font-semibold">EWS18 Alert</span>
                       )}
                     </div>
                   </div>
@@ -1058,12 +1345,11 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="auto_ancillary">Auto Ancillaries</SelectItem>
-                        <SelectItem value="textiles">Textiles & Garments</SelectItem>
-                        <SelectItem value="pharmaceuticals">Pharma & Chemicals</SelectItem>
-                        <SelectItem value="engineering">Light Engineering</SelectItem>
-                        <SelectItem value="retail_trade">Retail & Wholesale</SelectItem>
-                        <SelectItem value="food_processing">Agro & Food Processing</SelectItem>
+                        {SECTORS.map(([value, name]) => (
+                          <SelectItem key={value} value={value}>
+                            {name}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -1107,82 +1393,217 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
 
             <Card className="bg-surface">
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-semibold">2. Repayment Health & Early Warning Metrics</CardTitle>
-                <CardDescription className="text-xs">
-                  Finacle APIs 402, 404, 362, 391 debt servicing and collection ratios.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4 text-xs">
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div>
-                    <Label className="text-[11px] text-muted-foreground flex items-center">
-                      Demanded vs Collected
-                      <HelpTip
-                        enabled={guidedTips}
-                        content="Ratio of debt service demanded vs cash collected over trailing 12 months. Value < 0.80 triggers RBI EWS19 collection shortfall."
-                      />
-                    </Label>
-                    <Input
-                      type="number"
-                      step={0.01}
-                      min={0}
-                      max={1}
-                      required
-                      value={demandedRatio}
-                      onChange={(e) => setDemandedRatio(Number(e.target.value))}
-                      className="mt-1 h-8 font-mono text-xs"
-                    />
-                    {demandedRatio < 0.8 && (
-                      <span className="text-[10px] text-rose-500 font-medium">EWS19 Shortfall</span>
-                    )}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <CardTitle className="text-sm font-semibold">2. Repayment Health &amp; Early Warning Metrics</CardTitle>
+                    <div className="flex items-center gap-1 bg-muted/60 p-0.5 rounded border border-border text-[11px]">
+                      <button
+                        type="button"
+                        onClick={() => setAmountMode("amounts")}
+                        className={cn(
+                          "px-2 py-0.5 rounded transition-colors text-[11px] font-medium",
+                          amountMode === "amounts" ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        ₹ Amounts (Finacle 404)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAmountMode("ratio")}
+                        className={cn(
+                          "px-2 py-0.5 rounded transition-colors text-[11px] font-medium",
+                          amountMode === "ratio" ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        Direct Ratio
+                      </button>
+                    </div>
                   </div>
-                  <div>
-                    <Label className="text-[11px] text-muted-foreground flex items-center">
-                      Current DPD (Days)
-                      <HelpTip
-                        enabled={guidedTips}
-                        content="Days Past Due on credit obligations: 1–30 days = SMA-0; 31–60 days = SMA-1; 61–90 days = SMA-2; >90 days = NPA Default."
-                      />
-                    </Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      max={90}
-                      step={1}
-                      required
-                      value={dpd}
-                      onChange={(e) => setDpd(Number(e.target.value))}
-                      className="mt-1 h-8 font-mono text-xs"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-[11px] text-muted-foreground flex items-center">
-                      EMI Bounces (Last 6m)
-                      <HelpTip
-                        enabled={guidedTips}
-                        content="Count of inward check or NACH/ECS debit bounces due to insufficient funds in trailing 6 calendar months."
-                      />
-                    </Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      max={24}
-                      step={1}
-                      required
-                      value={emiBounces}
-                      onChange={(e) => setEmiBounces(Number(e.target.value))}
-                      className="mt-1 h-8 font-mono text-xs"
-                    />
+                  <div className="flex flex-wrap items-center gap-1">
+                    <Badge variant="outline" className="text-[11px] font-mono border-blue-500/30 text-blue-600 bg-blue-50/40 dark:bg-blue-950/40">
+                      CBS-02 · Repayment
+                    </Badge>
+                    <Badge variant="outline" className="text-[11px] font-mono border-amber-500/30 text-amber-600 bg-amber-50/40 dark:bg-amber-950/40">
+                      CBS-01 · DPD
+                    </Badge>
+                    <Badge variant="outline" className="text-[11px] font-mono border-purple-500/30 text-purple-600 bg-purple-50/40 dark:bg-purple-950/40">
+                      ESB-01 · Bounces
+                    </Badge>
+                    <Badge variant="outline" className="text-[11px] font-mono border-rose-500/30 text-rose-600 bg-rose-50/40 dark:bg-rose-950/40">
+                      CBS-05 · Liens
+                    </Badge>
                   </div>
                 </div>
+              </CardHeader>
+              <CardContent className="space-y-4 text-xs">
+                {amountMode === "amounts" ? (
+                  <>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div>
+                        <Label className="text-[11px] text-muted-foreground flex items-center">
+                          Demanded Dues (₹)
+                          <HelpTip
+                            enabled={guidedTips}
+                            content="Overdue position (CBS-02): Cumulative debt-service dues demanded across trailing 12 months."
+                          />
+                        </Label>
+                        <Input
+                          type="number"
+                          min={1000}
+                          step={10000}
+                          required
+                          value={demandedAmt}
+                          onChange={(e) => handleDemandedAmtChange(Number(e.target.value))}
+                          className="mt-1 h-8 font-mono text-xs"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-[11px] text-muted-foreground flex items-center">
+                          Collected Dues (₹)
+                          <HelpTip
+                            enabled={guidedTips}
+                            content="Overdue position (CBS-02): Total actual cash recoveries credited against demand."
+                          />
+                        </Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          step={10000}
+                          required
+                          value={collectedAmt}
+                          onChange={(e) => handleCollectedAmtChange(Number(e.target.value))}
+                          className="mt-1 h-8 font-mono text-xs"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-[11px] text-muted-foreground flex items-center">
+                          Derived Collection Ratio
+                          <HelpTip
+                            enabled={guidedTips}
+                            content="Collected ÷ Demanded ratio. Ratio < 0.80 triggers RBI EWS19 collection shortfall."
+                          />
+                        </Label>
+                        <div className="mt-1 flex h-8 items-center rounded-md border border-input bg-muted px-2 font-mono text-xs font-semibold">
+                          {Math.round(demandedRatio * 100)}% ({demandedRatio})
+                          {demandedRatio < 0.8 && (
+                            <span className="ml-auto text-[11px] text-rose-500 font-semibold">EWS19 Shortfall</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <Label className="text-[11px] text-muted-foreground flex items-center">
+                          Current DPD (Days)
+                          <HelpTip
+                            enabled={guidedTips}
+                            content="Days Past Due on credit obligations: 1–30 days = SMA-0; 31–60 days = SMA-1; 61–90 days = SMA-2; >90 days = NPA."
+                          />
+                        </Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={90}
+                          step={1}
+                          required
+                          value={dpd}
+                          onChange={(e) => setDpd(Number(e.target.value))}
+                          className="mt-1 h-8 font-mono text-xs"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-[11px] text-muted-foreground flex items-center">
+                          EMI Bounces (Last 6m)
+                          <HelpTip
+                            enabled={guidedTips}
+                            content="Count of inward check or NACH/ECS debit bounces due to insufficient funds in trailing 6 calendar months."
+                          />
+                        </Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={24}
+                          step={1}
+                          required
+                          value={emiBounces}
+                          onChange={(e) => setEmiBounces(Number(e.target.value))}
+                          className="mt-1 h-8 font-mono text-xs"
+                        />
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div>
+                      <Label className="text-[11px] text-muted-foreground flex items-center">
+                        Demanded vs Collected
+                        <HelpTip
+                          enabled={guidedTips}
+                          content="Ratio of debt service demanded vs cash collected over trailing 12 months. Value < 0.80 triggers RBI EWS19 collection shortfall."
+                        />
+                      </Label>
+                      <Input
+                        type="number"
+                        step={0.01}
+                        min={0}
+                        max={1}
+                        required
+                        value={demandedRatio}
+                        onChange={(e) => setDemandedRatio(Number(e.target.value))}
+                        className="mt-1 h-8 font-mono text-xs"
+                      />
+                      {demandedRatio < 0.8 && (
+                        <span className="text-[11px] text-rose-500 font-medium">EWS19 Shortfall</span>
+                      )}
+                    </div>
+                    <div>
+                      <Label className="text-[11px] text-muted-foreground flex items-center">
+                        Current DPD (Days)
+                        <HelpTip
+                          enabled={guidedTips}
+                          content="Days Past Due on credit obligations: 1–30 days = SMA-0; 31–60 days = SMA-1; 61–90 days = SMA-2; >90 days = NPA. Sets the RBI watch bucket and the Ind AS 109 stage floor (Stage 2 past 30 days, Stage 3 past 90). It does not move the PD: the model excludes DPD to avoid circular leakage."
+                        />
+                      </Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={90}
+                        step={1}
+                        required
+                        value={dpd}
+                        onChange={(e) => setDpd(Number(e.target.value))}
+                        className="mt-1 h-8 font-mono text-xs"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-[11px] text-muted-foreground flex items-center">
+                        EMI Bounces (Last 6m)
+                        <HelpTip
+                          enabled={guidedTips}
+                          content="Count of inward check or NACH/ECS debit bounces due to insufficient funds in trailing 6 calendar months."
+                        />
+                      </Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={24}
+                        step={1}
+                        required
+                        value={emiBounces}
+                        onChange={(e) => setEmiBounces(Number(e.target.value))}
+                        className="mt-1 h-8 font-mono text-xs"
+                      />
+                    </div>
+                  </div>
+                )}
 
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
                     <Label className="text-[11px] text-muted-foreground flex items-center">
-                      Lien / Encumbrance Flag (API 362)
+                      Lien / Encumbrance Flag (CBS-05)
                       <HelpTip
                         enabled={guidedTips}
-                        content="Finacle API 362 Lien Inquiry: 1 indicates statutory tax notice, income tax attachment, GST demand, or court attachment on collateral."
+                        content="Lien enquiry (CBS-05): 1 indicates statutory tax notice, income tax attachment, GST demand, or court attachment on collateral."
                       />
                     </Label>
                     <Select value={String(lienFlag)} onValueChange={(v) => setLienFlag(Number(v))}>
@@ -1197,10 +1618,10 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                   </div>
                   <div>
                     <Label className="text-[11px] text-muted-foreground flex items-center">
-                      Restructuring History (API 391)
+                      Restructuring History (CBS-04)
                       <HelpTip
                         enabled={guidedTips}
-                        content="Finacle API 391 Restructuring Flag: 1 indicates past tenure extension, moratorium, or interest capitalization."
+                        content="Loan profile restructuring flag (CBS-04): 1 indicates past tenure extension, moratorium, or interest capitalization."
                       />
                     </Label>
                     <Select
@@ -1321,7 +1742,7 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                     <div className="flex items-center justify-between">
                       <ActionTooltip
                         enabled={guidedTips}
-                        content="Facility Approved: 12-month PD is within bank risk appetite (<3.0%), Ind AS 109 Stage 1. Qualifies for fast-track credit sanction."
+                        content="Green verdict: grade RG1–RG4 (12-month PD below 11%) and no regulatory escalation from days past due. The sanction itself stays with the delegated authority."
                       >
                         <span className="flex items-center gap-2 text-xs font-bold text-emerald-700 dark:text-emerald-400 cursor-help">
                           <CheckCircle2 className="h-4 w-4 shrink-0" />
@@ -1331,7 +1752,7 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                       <div className="flex items-center gap-1.5">
                         <ActionTooltip
                           enabled={guidedTips}
-                          content="Green Criteria: Calibrated 12-month PD < 3.0%, Ind AS 109 Stage 1, 0 cheque bounces, healthy debt-service collection (>95%), and drawing power fully backed. Qualifies for fast-track processing."
+                          content="Green = grade RG1–RG4, i.e. calibrated 12-month PD below 11%, unless days past due escalate the account. Same bands as the portfolio and the guide."
                         >
                           <button
                             type="button"
@@ -1344,7 +1765,7 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                           enabled={guidedTips}
                           content="Fast-Track Underwriting: Discretionary sanction delegated to Branch Credit Committee with standard annual review."
                         >
-                          <Badge className="bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/40 text-[10px] cursor-help">
+                          <Badge className="bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/40 text-[11px] cursor-help">
                             Fast-Track
                           </Badge>
                         </ActionTooltip>
@@ -1391,7 +1812,7 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                     <div className="flex items-center justify-between">
                       <ActionTooltip
                         enabled={guidedTips}
-                        content="Conditional Sanction: Incipient stress or moderate default risk (3.0%–12.0%). Sanction permitted only with mandatory covenants."
+                        content="Amber verdict: grade RG5–RG7 (12-month PD 11%–32%) or a days-past-due escalation. Sanction only with covenants and committee review."
                       >
                         <span className="flex items-center gap-2 text-xs font-bold text-amber-700 dark:text-amber-400 cursor-help">
                           <AlertTriangle className="h-4 w-4 shrink-0" />
@@ -1401,7 +1822,7 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                       <div className="flex items-center gap-1.5">
                         <ActionTooltip
                           enabled={guidedTips}
-                          content="Amber Criteria: Calibrated 12-month PD between 3.0% and 12.0%, or incipient stress detected (DP gap > 0%, EMI bounces, or GST filing delays). Requires credit committee approval with mandatory covenants."
+                          content="Amber = grade RG5–RG7 (12-month PD 11%–32%), or a Green grade escalated by 1–60 days past due. Sanction only with covenants and committee review."
                         >
                           <button
                             type="button"
@@ -1414,14 +1835,23 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                           enabled={guidedTips}
                           content="Incipient Stress: Breached one or more early-warning covenants (drawing power shortfall, overdue EMI, or delayed GST filing)."
                         >
-                          <Badge className="bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/40 text-[10px] cursor-help">
+                          <Badge className="bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/40 text-[11px] cursor-help">
                             Incipient Stress
                           </Badge>
                         </ActionTooltip>
                       </div>
                     </div>
                     <p className="text-xs text-foreground leading-relaxed">
-                      Moderate risk detected: 12-month PD of <strong>{formatPercent(result.pd_12m, 2)}</strong> (Grade <strong>{result.risk_grade}</strong>).
+                      {result.regulatory_overlay?.applied ? (
+                        <>
+                          Account is <strong>{result.regulatory_overlay.dpd} days past due</strong> ({result.regulatory_overlay.bucket}), so RBI classification sets the watch status; model PD is{" "}
+                          <strong>{formatPercent(result.pd_12m, 2)}</strong> (Grade <strong>{result.risk_grade}</strong>).
+                        </>
+                      ) : (
+                        <>
+                          Moderate risk detected: 12-month PD of <strong>{formatPercent(result.pd_12m, 2)}</strong> (Grade <strong>{result.risk_grade}</strong>).
+                        </>
+                      )}
                       {dpGapPct > 0 && ` Drawing power is eroded by ${dpGapPct}%.`}
                       {emiBounces > 0 && ` ${emiBounces} EMI bounce(s) in last 6 months.`}
                       {gstDelay > 10 && ` GST delay of ${gstDelay} days.`}
@@ -1435,6 +1865,22 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                       </ol>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-amber-500/20">
+                      <ActionTooltip
+                        enabled={guidedTips}
+                        content="Refer for MSME restructuring with a Techno-Economic Viability (TEV) study before recovery action."
+                      >
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setDecisionType("restructure");
+                            setModalOpen(true);
+                          }}
+                          className="h-7 text-[11px] gap-1 border-purple-500/40 text-purple-800 dark:text-purple-300 hover:bg-purple-500/10"
+                        >
+                          <FileText className="h-3 w-3 text-purple-600 dark:text-purple-400" /> 📋 Refer for restructuring
+                        </Button>
+                      </ActionTooltip>
                       <ActionTooltip
                         enabled={guidedTips}
                         content="Export or print formal Credit Appraisal Memo (CAM) formatted for Zonal Credit Committee review."
@@ -1469,7 +1915,7 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                     <div className="flex items-center justify-between">
                       <ActionTooltip
                         enabled={guidedTips}
-                        content="Proposal Rejected / Commencing Recovery: 12-month PD exceeds risk threshold (>12.0%) or critical RBI triggers breached."
+                        content="Red verdict: grade RG8–RG10 (12-month PD 32% or more) or 61+ days past due. Do not enhance; refer for restructuring assessment or recovery."
                       >
                         <span className="flex items-center gap-2 text-xs font-bold text-red-700 dark:text-red-400 cursor-help">
                           <AlertOctagon className="h-4 w-4 shrink-0" />
@@ -1492,23 +1938,48 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                           enabled={guidedTips}
                           content="Impaired / High Risk: Ind AS 109 Stage 2/3 classification requiring lifetime ECL provisioning and SARB recovery."
                         >
-                          <Badge className="bg-red-500/20 text-red-700 dark:text-red-300 border-red-500/40 text-[10px] cursor-help">
+                          <Badge className="bg-red-500/20 text-red-700 dark:text-red-300 border-red-500/40 text-[11px] cursor-help">
                             High Risk / Impaired
                           </Badge>
                         </ActionTooltip>
                       </div>
                     </div>
                     <p className="text-xs text-foreground leading-relaxed">
-                      Default probability of <strong>{formatPercent(result.pd_12m, 2)}</strong> (Grade <strong>{result.risk_grade}</strong>) exceeds bank risk tolerance.
+                      {result.regulatory_overlay?.applied ? (
+                        <>
+                          Account is <strong>{result.regulatory_overlay.dpd} days past due</strong> ({result.regulatory_overlay.bucket}): the overdue status alone puts it beyond bank risk tolerance, whatever the model PD of{" "}
+                          <strong>{formatPercent(result.pd_12m, 2)}</strong> (Grade <strong>{result.risk_grade}</strong>).
+                        </>
+                      ) : (
+                        <>
+                          Default probability of <strong>{formatPercent(result.pd_12m, 2)}</strong> (Grade <strong>{result.risk_grade}</strong>) exceeds bank risk tolerance.
+                        </>
+                      )}
                       {dpGapPct >= 25 && " Severe Drawing Power erosion (EWS18)."}
                       {demandedRatio < 0.8 && " Critical debt-service collection shortfall (EWS19)."}
-                      {dpd > 0 && ` Past due ${dpd} days.`}
+                      {dpd > 0 && !result.regulatory_overlay?.applied && ` Past due ${dpd} days.`}
                       {lienFlag === 1 && " Statutory tax lien encumbrance active."}
                     </p>
                     <div className="rounded border border-red-500/20 bg-background/60 p-2 text-[11px] text-muted-foreground">
                       <strong className="text-foreground">Credit Directive:</strong> Do not enhance limit. Issue 15-day cure notice; if unresolved, recall facility and refer to Stressed Asset Resolution Branch.
                     </div>
                     <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-red-500/20">
+                      <ActionTooltip
+                        enabled={guidedTips}
+                        content="Refer for MSME restructuring with a Techno-Economic Viability (TEV) study before SARB recovery action."
+                      >
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setDecisionType("restructure");
+                            setModalOpen(true);
+                          }}
+                          className="h-7 text-[11px] gap-1 border-purple-500/40 text-purple-800 dark:text-purple-300 hover:bg-purple-500/10"
+                        >
+                          <FileText className="h-3 w-3 text-purple-600 dark:text-purple-400" /> 📋 Refer for restructuring
+                        </Button>
+                      </ActionTooltip>
                       <ActionTooltip
                         enabled={guidedTips}
                         content="Export or print formal Credit Appraisal Memo (CAM) formatted for Zonal Credit Committee review."
@@ -1545,7 +2016,7 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
               <Card className="border-primary/30 bg-surface shadow-sm">
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                    <span className="text-[11px] uppercase tracking-widest text-muted-foreground">
                       Appraisal Assessment
                     </span>
                     <Badge className={ragTone[result.rag]}>
@@ -1559,15 +2030,44 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                     </span>
                   </CardTitle>
                   <CardDescription className="text-xs">
-                    Watch Action: <span className="font-semibold text-foreground">{result.sma_watch}</span> ·{" "}
+                    <span className="block text-sm text-foreground">
+                      <span className="font-semibold">{result.rag === "Green" ? "Why it is Green: " : "Why flagged: "}</span>
+                      {whyFlaggedLine({
+                        rag: result.rag,
+                        reason_codes: [],
+                        raw: {
+                          emi_bounce_6m: emiBounces,
+                          drawing_power_gap_pct: Math.max(0, ((sanctionLimit - drawingPower) / Math.max(1, sanctionLimit)) * 100),
+                          demanded_vs_collected_ratio: demandedRatio,
+                          cibil_score: cibilScore,
+                          dpd,
+                          lien_flag: lienFlag,
+                          restructuring_flag: restructuringFlag,
+                          gst_filing_delay_days: gstDelay,
+                          itc_mismatch_flag: itcMismatch,
+                        },
+                      } as unknown as BorrowerScore, 4)}.
+                    </span>
+                    RBI SMA (days past due): <span className="font-semibold text-foreground">{rbiSma(dpd) ?? "—"}</span>
+                    {" · "}Model watch: <span className="font-semibold text-foreground">{watchLabel(result.sma_watch)}</span> ·{" "}
                     {result.recommended_action}
+                    {result.regulatory_overlay?.applied && (
+                      <span className="mt-1.5 block rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] text-foreground">
+                        <span className="font-medium">RBI classification:</span>{" "}
+                        {result.regulatory_overlay.dpd} DPD places this facility in{" "}
+                        {result.regulatory_overlay.bucket}
+                        {result.regulatory_overlay.stage_floor > 1 &&
+                          ` (Ind AS 109 Stage ${result.regulatory_overlay.stage_floor})`}
+                        .
+                      </span>
+                    )}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4 text-xs">
                   {/* Ind AS 109 & ECL Row */}
                   <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-card p-3">
                     <div>
-                      <div className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center">
+                      <div className="text-[11px] uppercase tracking-widest text-muted-foreground flex items-center">
                         Ind AS 109 Stage
                         <HelpTip
                           enabled={guidedTips}
@@ -1577,7 +2077,7 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                       <div className="mt-0.5 text-sm font-semibold">
                         Stage {result.ecl_stage ?? 1}
                       </div>
-                      <div className="text-[10px] text-muted-foreground">
+                      <div className="text-[11px] text-muted-foreground">
                         {result.ecl_stage === 1
                           ? "12-Month ECL"
                           : result.ecl_stage === 2
@@ -1586,7 +2086,7 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                       </div>
                     </div>
                     <div>
-                      <div className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center">
+                      <div className="text-[11px] uppercase tracking-widest text-muted-foreground flex items-center">
                         Expected Loss (ECL)
                         <HelpTip
                           enabled={guidedTips}
@@ -1596,7 +2096,7 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                       <div className="mt-0.5 text-sm font-semibold font-mono text-rose-500">
                         {formatInr(result.ecl ?? 0)}
                       </div>
-                      <div className="text-[10px] text-muted-foreground">
+                      <div className="text-[11px] text-muted-foreground">
                         LGD 45% · Provisioning
                       </div>
                     </div>
@@ -1635,7 +2135,9 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                     ) : (
                       <div className="flex items-center gap-2 rounded-md border border-emerald-500/20 bg-emerald-500/10 p-2 text-[11px] text-emerald-600 dark:text-emerald-400">
                         <CheckCircle2 className="h-4 w-4" />
-                        No RBI Early Warning Signals triggered. Account compliant.
+                        {result.regulatory_overlay?.applied
+                          ? `No further RBI early-warning signals triggered. Overdue status (${result.regulatory_overlay.bucket}) is classified above.`
+                          : "No RBI Early Warning Signals triggered. Account compliant."}
                       </div>
                     )}
                   </div>
@@ -1646,7 +2148,7 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                       <AccordionTrigger className="text-xs font-semibold py-2 hover:no-underline">
                         <div className="flex items-center gap-1.5 text-foreground">
                           <Sparkles className="h-3.5 w-3.5 text-primary" />
-                          <span>Inspect AI Scoring Details & SHAP Taxonomy</span>
+                          <span>How the score was calculated (technical detail)</span>
                         </div>
                       </AccordionTrigger>
                       <AccordionContent className="pt-2 text-xs space-y-2">
@@ -1662,7 +2164,7 @@ Underwriting Timestamp: ${new Date().toLocaleString()}`;
                               >
                                 <span className="truncate pr-2">{rc.label || rc.feature}</span>
                                 <span
-                                  className={`font-mono text-[10px] font-semibold ${
+                                  className={`font-mono text-[11px] font-semibold ${
                                     (rc.shap ?? 0) > 0 ? "text-rose-500" : "text-emerald-500"
                                   }`}
                                 >

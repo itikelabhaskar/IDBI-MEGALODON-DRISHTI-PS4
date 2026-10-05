@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useRole } from "@/lib/role-context";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import {
@@ -36,8 +38,12 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { GuidedTooltip, HintIcon } from "@/components/drishti/guided-tooltip";
+import { PageApiDrawer } from "@/components/drishti/page-api-drawer";
 
 export const Route = createFileRoute("/governance")({
+  validateSearch: (search: Record<string, unknown>): { q?: string } => ({
+    q: search.q != null && search.q !== "" ? String(search.q) : undefined,
+  }),
   component: GovernanceView,
 });
 
@@ -49,50 +55,6 @@ const SUTRAS = [
       "Group fairness monitored with the 80% disparate-impact rule",
       "Refuse-to-score coverage gate: no over-scoring on thin data",
     ],
-  },
-];
-
-const DEFAULT_AUDIT_DECISIONS: DecisionRecord[] = [
-  {
-    id: "DEC-2026-001",
-    loan_id: "IDBI-MUM-8004",
-    decision: "override",
-    original_grade: "RG8",
-    revised_grade: "RG6",
-    override_action: "Upgrade RG8 → RG6",
-    rationale: "Unencumbered prime industrial collateral provided with 2.2x coverage ratio; promoter equity infusion confirmed.",
-    officer: "S. Ramanathan (Zonal Head)",
-    ts: new Date(Date.now() - 3600000 * 4).toISOString(),
-  },
-  {
-    id: "DEC-2026-002",
-    loan_id: "IDBI-BLR-8009",
-    decision: "accept",
-    original_grade: "RG3",
-    revised_grade: "RG3",
-    rationale: "Strong debt service coverage (DSCR 1.82x) with clean payment track record across all consortium banks.",
-    officer: "P. Nair (Chief Manager)",
-    ts: new Date(Date.now() - 3600000 * 18).toISOString(),
-  },
-  {
-    id: "DEC-2026-003",
-    loan_id: "IDBI-DEL-8006",
-    decision: "defer",
-    original_grade: "RG7",
-    revised_grade: "RG7",
-    rationale: "Awaiting Q3 audited GST turnover reconciliation to verify sales cashflow before final limit renewal.",
-    officer: "A. Verma (Senior Credit Officer)",
-    ts: new Date(Date.now() - 3600000 * 42).toISOString(),
-  },
-  {
-    id: "DEC-2026-004",
-    loan_id: "IDBI-PUN-8003",
-    decision: "reject",
-    original_grade: "RG9",
-    revised_grade: "RG9",
-    rationale: "Persistent drawing power deficit (>22%) and continuous SMA-1 categorization over past 90 days.",
-    officer: "Credit Committee (Controlling Office)",
-    ts: new Date(Date.now() - 3600000 * 72).toISOString(),
   },
 ];
 
@@ -122,11 +84,22 @@ function GovernanceView() {
   const model = getSnapshot().model_card;
   const [liveMetrics, setLiveMetrics] = useState<GovernanceMetrics | null>(null);
   const [driftHistory, setDriftHistory] = useState<GovernanceDriftRecord[]>([]);
-  const [decisions, setDecisions] = useState<DecisionRecord[]>(DEFAULT_AUDIT_DECISIONS);
+  const [decisions, setDecisions] = useState<DecisionRecord[]>([]);
   const [isLive, setIsLive] = useState(false);
-  const [decisionFilter, setDecisionFilter] = useState<string>("all");
-  const [searchQuery, setSearchQuery] = useState("");
+  const { role } = useRole();
+  // Second line of defence starts from the overrides of the model grade.
+  const [decisionFilter, setDecisionFilter] = useState<string>(role === "Risk Admin" ? "override" : "all");
+  // ?q=<loan id> arrives from a borrower page's "Decision history" link.
+  const { q: initialQuery } = Route.useSearch();
+  const [searchQuery, setSearchQuery] = useState(initialQuery ?? "");
   const [highlightedSection, setHighlightedSection] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (initialQuery) {
+      const t = setTimeout(() => scrollToSection("audit-trail-section"), 300);
+      return () => clearTimeout(t);
+    }
+  }, [initialQuery]);
 
   const scrollToSection = (id: string) => {
     const el = document.getElementById(id);
@@ -142,7 +115,7 @@ function GovernanceView() {
     Promise.all([
       fetchGovernanceMetrics(),
       fetchGovernanceDrift(20),
-      fetchAllDecisions(20),
+      fetchAllDecisions(500),
     ]).then(([m, d, decs]) => {
       if (!active) return;
       if (m) {
@@ -189,37 +162,14 @@ function GovernanceView() {
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-muted-foreground">
-            <span>FREE-AI sutras · model risk · audit trail</span>
-            <GuidedTooltip
-              content={
-                isLive
-                  ? "Live connection active: streaming drift checkpoints, PSI calculations, and committee decisions directly from audit ledger database."
-                  : "Static snapshot mode: displaying precomputed regulatory baseline benchmarks."
-              }
-            >
-              <Badge
-                variant="outline"
-                className={
-                  isLive
-                    ? "border-emerald-500/40 text-emerald-600 bg-emerald-500/10 font-medium text-[9px] px-1.5 py-0 h-4 cursor-help"
-                    : "border-muted-foreground/30 text-muted-foreground font-normal text-[9px] px-1.5 py-0 h-4 cursor-help"
-                }
-              >
-                {isLive ? "Live Governance Engine (RDS / SQLite)" : "Snapshot Mode"}
-              </Badge>
-            </GuidedTooltip>
-          </div>
-          <h1 className="mt-1 text-xl font-semibold text-foreground flex items-center gap-2">
+          <h1 className="text-xl font-semibold text-foreground flex items-center gap-2">
             Governance & Compliance
             <HintIcon text="Regulatory compliance dashboard covering FREE-AI guidelines, group fairness (80% rule), PSI distribution drift, and human-in-the-loop credit committee audit log." />
           </h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            Model health receipts for the Risk Admin — what the regulator will ask, answered upfront.
-          </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <PageApiDrawer routePath="/governance" triggerLabel="Audit & Governance APIs" />
           <button
             type="button"
             onClick={() => scrollToSection("audit-trail-section")}
@@ -238,7 +188,7 @@ function GovernanceView() {
             <CardContent className="pt-5">
               <div className="flex items-center justify-between">
                 <ShieldCheck className="h-5 w-5 text-primary" />
-                <Badge variant="outline" className="border-primary/30 text-primary text-[10px] font-normal">
+                <Badge variant="outline" className="border-primary/30 text-primary text-[11px] font-normal">
                   Calibrated
                 </Badge>
               </div>
@@ -258,7 +208,7 @@ function GovernanceView() {
             <CardContent className="pt-5">
               <div className="flex items-center justify-between">
                 <Scale className="h-5 w-5 text-primary" />
-                <Badge variant="outline" className="border-primary/30 text-primary text-[10px] font-normal">
+                <Badge variant="outline" className="border-primary/30 text-primary text-[11px] font-normal">
                   Ind AS 109
                 </Badge>
               </div>
@@ -280,7 +230,7 @@ function GovernanceView() {
                 <Users className="h-5 w-5 text-primary" />
                 <Badge
                   variant="outline"
-                  className={`text-[10px] font-medium ${
+                  className={`text-[11px] font-medium ${
                     fairnessStatus === "compliant"
                       ? "border-emerald-500/40 text-emerald-600 bg-emerald-500/10"
                       : fairnessStatus === "review"
@@ -316,7 +266,7 @@ function GovernanceView() {
                 <div className="flex items-center gap-1">
                   <Badge
                     variant="outline"
-                    className="border-emerald-500/40 text-emerald-600 bg-emerald-500/10 text-[10px] font-medium"
+                    className="border-emerald-500/40 text-emerald-600 bg-emerald-500/10 text-[11px] font-medium"
                   >
                     {liveMetrics?.psi_status ?? "Stable"}
                   </Badge>
@@ -324,7 +274,7 @@ function GovernanceView() {
                 </div>
               </div>
               <div className="mt-2 text-lg font-semibold tabular-nums flex items-baseline gap-2">
-                <span>PSI {(liveMetrics?.psi_overall ?? 0.042).toFixed(3)}</span>
+                <span>Data drift (PSI) {(liveMetrics?.psi_overall ?? 0.042).toFixed(3)}</span>
                 <span className="text-xs font-normal text-emerald-600 font-sans">(&lt; 0.10 Target)</span>
               </div>
               <div className="text-[11px] text-muted-foreground mt-1">
@@ -424,12 +374,9 @@ function GovernanceView() {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <Activity className="h-4 w-4 text-primary" /> Model Stability & PSI Drift Monitoring
+                <Activity className="h-4 w-4 text-primary" /> Has the data drifted since training? (PSI)
                 <HintIcon text="Population Stability Index (PSI) checkpoints stored in audit database and monitored against regulatory drift thresholds." />
               </CardTitle>
-              <CardDescription className="text-xs">
-                Population Stability Index (PSI) checkpoints stored in audit database and monitored against regulatory drift thresholds.
-              </CardDescription>
             </div>
             <Badge variant="outline" className="text-xs font-mono">
               Threshold: PSI &lt; 0.10
@@ -472,7 +419,7 @@ function GovernanceView() {
 
           {driftHistory.length === 0 ? (
             <div className="text-xs text-muted-foreground py-4 text-center border rounded-md">
-              Baseline checkpoint active (PSI 0.042, Stable). New checkpoints generated upon batch scoring runs.
+              No drift checkpoints recorded yet. They are written by the scheduled batch scoring job (src/pipelines/score_batch.py), not by uploads on the Batch page.
             </div>
           ) : (
             <Table containerClassName="border rounded-md overflow-auto" className="text-xs min-w-[700px]">
@@ -523,8 +470,8 @@ function GovernanceView() {
                           variant="outline"
                           className={
                             d.alert_triggered
-                              ? "border-rose-500/40 text-rose-600 bg-rose-500/10 text-[10px]"
-                              : "border-emerald-500/40 text-emerald-600 bg-emerald-500/10 text-[10px]"
+                              ? "border-rose-500/40 text-rose-600 bg-rose-500/10 text-[11px]"
+                              : "border-emerald-500/40 text-emerald-600 bg-emerald-500/10 text-[11px]"
                           }
                         >
                           {d.alert_triggered ? "Drift Alert" : "Stable"}
@@ -561,11 +508,8 @@ function GovernanceView() {
                 <History className="h-4 w-4 text-primary" /> Credit Committee Human-in-the-Loop Audit Trail
                 <HintIcon text="Immutable audit ledger recording all underwriter appraisal acceptances, grade overrides, deferrals, and rejections." />
               </CardTitle>
-              <CardDescription className="text-xs">
-                Immutable audit ledger recording all underwriter appraisal acceptances, grade overrides, deferrals, and rejections.
-              </CardDescription>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <div className="relative w-48">
                 <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
                 <Input
@@ -575,8 +519,8 @@ function GovernanceView() {
                   className="h-8 pl-7 text-xs"
                 />
               </div>
-              <div className="flex items-center gap-1">
-                {(["all", "accept", "override", "defer", "reject"] as const).map((filterVal) => (
+              <div className="flex flex-wrap items-center gap-1">
+                {(["all", "accept", "override", "defer", "reject", "restructure"] as const).map((filterVal) => (
                   <button
                     key={filterVal}
                     type="button"
@@ -596,10 +540,30 @@ function GovernanceView() {
         </CardHeader>
         <CardContent>
           {filteredDecisions.length === 0 ? (
-            <div className="text-xs text-muted-foreground py-6 text-center border rounded-md">
-              {decisions.length === 0
-                ? "No decisions recorded yet. Decisions logged in Underwriting simulator or Borrower details appear here immediately."
-                : "No decisions match current search / filter criteria."}
+            <div className="text-center py-8 px-4 border border-dashed rounded-lg bg-muted/20 space-y-3">
+              <div className="mx-auto w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                <History className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold">
+                  {decisions.length === 0 ? "No Committee Decisions Logged Yet" : "No Matching Decisions Found"}
+                </h3>
+                <p className="text-xs text-muted-foreground max-w-md mx-auto mt-1">
+                  {decisions.length === 0
+                    ? "HITL decisions recorded during loan appraisal in Underwrite or Borrower 360 are written to this audit trail with officer, timestamp and rationale."
+                    : "No decisions match current search / filter criteria. Try clearing the filter or search term."}
+                </p>
+              </div>
+              {decisions.length === 0 && (
+                <div className="flex items-center justify-center gap-2 pt-1">
+                  <Button size="sm" variant="outline" asChild className="text-xs h-7">
+                    <Link to="/underwrite">Appraise Loan Proposal</Link>
+                  </Button>
+                  <Button size="sm" variant="outline" asChild className="text-xs h-7">
+                    <Link to="/">Select from Portfolio</Link>
+                  </Button>
+                </div>
+              )}
             </div>
           ) : (
             <Table containerClassName="border rounded-md overflow-auto" className="text-xs min-w-[750px]">
@@ -614,7 +578,7 @@ function GovernanceView() {
                   <TableHead className="text-xs">
                     <span className="inline-flex items-center gap-1">
                       Decision
-                      <HintIcon text="Appraisal committee decision: ACCEPT, OVERRIDE, DEFER, or REJECT." />
+                      <HintIcon text="Appraisal committee decision: ACCEPT, OVERRIDE, DEFER, REJECT, or RESTRUCTURE." />
                     </span>
                   </TableHead>
                   <TableHead className="text-xs">
@@ -657,32 +621,40 @@ function GovernanceView() {
                         variant="outline"
                         className={
                           dec.decision === "accept"
-                            ? "border-emerald-500/40 text-emerald-600 bg-emerald-500/10 text-[10px]"
+                            ? "border-emerald-500/40 text-emerald-600 bg-emerald-500/10 text-[11px]"
                             : dec.decision === "override"
-                            ? "border-amber-500/40 text-amber-600 bg-amber-500/10 text-[10px]"
+                            ? "border-amber-500/40 text-amber-600 bg-amber-500/10 text-[11px]"
                             : dec.decision === "defer"
-                            ? "border-sky-500/40 text-sky-600 bg-sky-500/10 text-[10px]"
-                            : "border-rose-500/40 text-rose-600 bg-rose-500/10 text-[10px]"
+                            ? "border-sky-500/40 text-sky-600 bg-sky-500/10 text-[11px]"
+                            : dec.decision === "restructure"
+                            ? "border-purple-500/40 text-purple-600 bg-purple-500/10 text-[11px]"
+                            : "border-rose-500/40 text-rose-600 bg-rose-500/10 text-[11px]"
                         }
                       >
                         {dec.decision.toUpperCase()}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-xs">
-                      {dec.override_action ? (
-                        <span className="font-medium text-amber-600 dark:text-amber-400">
-                          {dec.override_action}
-                        </span>
-                      ) : dec.revised_grade ? (
-                        <span>Override → {dec.revised_grade}</span>
-                      ) : (
-                        <span className="text-muted-foreground">{dec.original_grade || "As Appraised"}</span>
+                      {/* Model grade at decision time, and the committee grade on an override. */}
+                      <span className="font-mono">{dec.original_grade || dec.risk_grade || "—"}</span>
+                      {dec.revised_grade && (
+                        <span className="font-medium text-amber-600 dark:text-amber-400"> → {dec.revised_grade}</span>
+                      )}
+                      {dec.override_action && !dec.revised_grade && (
+                        <div className="text-[11px] text-muted-foreground">{dec.override_action}</div>
                       )}
                     </TableCell>
                     <TableCell className="max-w-xs truncate text-xs text-muted-foreground" title={dec.rationale || dec.reason}>
                       {dec.rationale || dec.reason || "—"}
                     </TableCell>
-                    <TableCell className="text-xs font-mono">{dec.officer || dec.decided_by || "demo_officer"}</TableCell>
+                    <TableCell className="text-xs font-mono">
+                      {dec.officer || dec.decided_by || "—"}
+                      {"local" in dec && (
+                        <Badge variant="outline" className="ml-1 text-[11px] px-1 py-0 h-4 font-sans" title="API not reachable when this was recorded; kept on this browser only">
+                          this browser
+                        </Badge>
+                      )}
+                    </TableCell>
                     <TableCell className="text-xs text-muted-foreground font-mono">
                       {dec.ts ? new Date(dec.ts).toLocaleString("en-IN") : "Recent"}
                     </TableCell>

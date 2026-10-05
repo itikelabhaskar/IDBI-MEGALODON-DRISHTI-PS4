@@ -16,7 +16,10 @@ import { Route as BranchesRouteImport } from './routes/branches'
 import { Route as ContagionRouteImport } from './routes/contagion'
 import { Route as GovernanceRouteImport } from './routes/governance'
 import { Route as GuideRouteImport } from './routes/guide'
+import { Route as MarketRouteImport } from './routes/market'
+import { Route as ReferenceRouteImport } from './routes/reference'
 import { Route as ScenarioRouteImport } from './routes/scenario'
+import { Route as SectorsRouteImport } from './routes/sectors'
 import { Route as UnderwriteRouteImport } from './routes/underwrite'
 import { Route as BorrowersIdRouteImport } from './routes/borrowers.$id'
 
@@ -55,9 +58,24 @@ const GuideRoute = GuideRouteImport.update({
   path: '/guide',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MarketRoute = MarketRouteImport.update({
+  id: '/market',
+  path: '/market',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReferenceRoute = ReferenceRouteImport.update({
+  id: '/reference',
+  path: '/reference',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ScenarioRoute = ScenarioRouteImport.update({
   id: '/scenario',
   path: '/scenario',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SectorsRoute = SectorsRouteImport.update({
+  id: '/sectors',
+  path: '/sectors',
   getParentRoute: () => rootRouteImport,
 } as any)
 const UnderwriteRoute = UnderwriteRouteImport.update({
@@ -79,7 +97,10 @@ export interface FileRoutesByFullPath {
   '/contagion': typeof ContagionRoute
   '/governance': typeof GovernanceRoute
   '/guide': typeof GuideRoute
+  '/market': typeof MarketRoute
+  '/reference': typeof ReferenceRoute
   '/scenario': typeof ScenarioRoute
+  '/sectors': typeof SectorsRoute
   '/underwrite': typeof UnderwriteRoute
   '/borrowers/$id': typeof BorrowersIdRoute
 }
@@ -91,7 +112,10 @@ export interface FileRoutesByTo {
   '/contagion': typeof ContagionRoute
   '/governance': typeof GovernanceRoute
   '/guide': typeof GuideRoute
+  '/market': typeof MarketRoute
+  '/reference': typeof ReferenceRoute
   '/scenario': typeof ScenarioRoute
+  '/sectors': typeof SectorsRoute
   '/underwrite': typeof UnderwriteRoute
   '/borrowers/$id': typeof BorrowersIdRoute
 }
@@ -104,7 +128,10 @@ export interface FileRoutesById {
   '/contagion': typeof ContagionRoute
   '/governance': typeof GovernanceRoute
   '/guide': typeof GuideRoute
+  '/market': typeof MarketRoute
+  '/reference': typeof ReferenceRoute
   '/scenario': typeof ScenarioRoute
+  '/sectors': typeof SectorsRoute
   '/underwrite': typeof UnderwriteRoute
   '/borrowers/$id': typeof BorrowersIdRoute
 }
@@ -118,7 +145,10 @@ export interface FileRouteTypes {
     | '/contagion'
     | '/governance'
     | '/guide'
+    | '/market'
+    | '/reference'
     | '/scenario'
+    | '/sectors'
     | '/underwrite'
     | '/borrowers/$id'
   fileRoutesByTo: FileRoutesByTo
@@ -130,7 +160,10 @@ export interface FileRouteTypes {
     | '/contagion'
     | '/governance'
     | '/guide'
+    | '/market'
+    | '/reference'
     | '/scenario'
+    | '/sectors'
     | '/underwrite'
     | '/borrowers/$id'
   id:
@@ -142,7 +175,10 @@ export interface FileRouteTypes {
     | '/contagion'
     | '/governance'
     | '/guide'
+    | '/market'
+    | '/reference'
     | '/scenario'
+    | '/sectors'
     | '/underwrite'
     | '/borrowers/$id'
   fileRoutesById: FileRoutesById
@@ -155,7 +191,10 @@ export interface RootRouteChildren {
   ContagionRoute: typeof ContagionRoute
   GovernanceRoute: typeof GovernanceRoute
   GuideRoute: typeof GuideRoute
+  MarketRoute: typeof MarketRoute
+  ReferenceRoute: typeof ReferenceRoute
   ScenarioRoute: typeof ScenarioRoute
+  SectorsRoute: typeof SectorsRoute
   UnderwriteRoute: typeof UnderwriteRoute
   BorrowersIdRoute: typeof BorrowersIdRoute
 }
@@ -211,11 +250,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GuideRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/market': {
+      id: '/market'
+      path: '/market'
+      fullPath: '/market'
+      preLoaderRoute: typeof MarketRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reference': {
+      id: '/reference'
+      path: '/reference'
+      fullPath: '/reference'
+      preLoaderRoute: typeof ReferenceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/scenario': {
       id: '/scenario'
       path: '/scenario'
       fullPath: '/scenario'
       preLoaderRoute: typeof ScenarioRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sectors': {
+      id: '/sectors'
+      path: '/sectors'
+      fullPath: '/sectors'
+      preLoaderRoute: typeof SectorsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/underwrite': {
@@ -243,7 +303,10 @@ const rootRouteChildren: RootRouteChildren = {
   ContagionRoute: ContagionRoute,
   GovernanceRoute: GovernanceRoute,
   GuideRoute: GuideRoute,
+  MarketRoute: MarketRoute,
+  ReferenceRoute: ReferenceRoute,
   ScenarioRoute: ScenarioRoute,
+  SectorsRoute: SectorsRoute,
   UnderwriteRoute: UnderwriteRoute,
   BorrowersIdRoute: BorrowersIdRoute,
 }

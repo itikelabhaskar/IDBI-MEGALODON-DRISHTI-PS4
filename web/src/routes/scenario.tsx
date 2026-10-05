@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
@@ -19,7 +19,7 @@ import {
   CartesianGrid,
   Tooltip,
 } from "recharts";
-import { getSnapshot, simulateScenario, fetchBranches } from "@/lib/api";
+import { getSnapshot, useBook, simulateScenario, fetchBranches } from "@/lib/api";
 import type { ScenarioSimulateResponse, BranchSummary } from "@/lib/types";
 import { formatInrCompact, formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -28,9 +28,13 @@ import {
   GuidedTooltip,
   HintIcon,
 } from "@/components/drishti/guided-tooltip";
+import { PageApiDrawer } from "@/components/drishti/page-api-drawer";
 
 export const Route = createFileRoute("/scenario")({
-  component: ScenarioLab,
+  // Folded into Market Explorer; the old address still works.
+  beforeLoad: () => {
+    throw redirect({ to: "/market", search: { tab: "scenario" } });
+  },
 });
 
 /**
@@ -76,8 +80,8 @@ export function applyScenario(
   return 1 / (1 + Math.exp(-z2));
 }
 
-function ScenarioLab() {
-  const borrowers = getSnapshot().borrowers;
+export function ScenarioLab() {
+  const borrowers = useBook();
   const [repoBps, setRepoBps] = useState(0);
   const [gdpDrop, setGdpDrop] = useState(0);
   const [sectorStress, setSectorStress] = useState(0);
@@ -232,27 +236,13 @@ function ScenarioLab() {
     <div className="p-4 md:p-6 space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div>
-          <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
-            RBI macro overlay · sector betas · log-odds shift
-          </div>
-          <div className="flex items-center gap-2 mt-0.5">
-            <h1 className="text-xl font-semibold text-foreground">Scenario Lab</h1>
-            {isLiveEngine ? (
-              <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-[10px] font-normal">
-                ● Live DB Engine ({liveData?.total_accounts ?? 556} Facilities)
-              </Badge>
-            ) : (
-              <Badge variant="outline" className="bg-muted text-muted-foreground text-[10px] font-normal">
-                Offline Snapshot
-              </Badge>
-            )}
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-lg font-semibold text-foreground">Scenario Lab</h2>
+            <PageApiDrawer routePath="/scenario" triggerLabel="Macro & Financial APIs" />
             {isSimulating && (
-              <span className="text-[10px] text-muted-foreground animate-pulse">Running shock simulation...</span>
+              <span className="text-[11px] text-muted-foreground animate-pulse">Running shock simulation...</span>
             )}
           </div>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            Stress the book with rate hikes and growth shocks — watch expected credit loss respond across sectors.
-          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -310,9 +300,6 @@ function ScenarioLab() {
               <CardTitle className="text-sm">Macro Shocks</CardTitle>
               <HintIcon text="Calibrated to RBI Financial Stability Report (FSR) macro stress test matrices (2015–2024)." />
             </div>
-            <CardDescription className="text-xs">
-              Calibrated to the RBI_MACRO table (2015–2024).
-            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5 pt-2">
             {/* Regulatory Presets */}
@@ -322,7 +309,7 @@ function ScenarioLab() {
                 <button
                   type="button"
                   onClick={() => { setRepoBps(0); setGdpDrop(0); setSectorStress(0); }}
-                  className="text-[10px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1 underline"
+                  className="text-[11px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1 underline"
                   title="Reset macro shock parameters to zero"
                 >
                   <RotateCcw className="h-2.5 w-2.5" /> Reset
@@ -401,7 +388,7 @@ function ScenarioLab() {
                 step={25}
                 onValueChange={(v) => setRepoBps(v[0])}
               />
-              <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
+              <div className="mt-1 flex justify-between text-[11px] text-muted-foreground">
                 <span>0</span><span>400 bps</span>
               </div>
             </div>
@@ -423,7 +410,7 @@ function ScenarioLab() {
                 step={5}
                 onValueChange={(v) => setGdpDrop(v[0])}
               />
-              <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
+              <div className="mt-1 flex justify-between text-[11px] text-muted-foreground">
                 <span>0%</span><span>−5.0%</span>
               </div>
             </div>
@@ -435,7 +422,7 @@ function ScenarioLab() {
                     Target Sector
                     <HintIcon text="Select which sector receives the targeted sector-specific shock. You can target all high-beta cyclical industries or isolate a specific industry (e.g., Construction, Auto Components, Textiles)." />
                   </span>
-                  <Badge variant="outline" className="text-[10px] font-medium text-primary border-primary/30 bg-primary/5">
+                  <Badge variant="outline" className="text-[11px] font-medium text-primary border-primary/30 bg-primary/5">
                     {targetSector === "all_cyclical"
                       ? "All Cyclical (β ≥ 1.2)"
                       : `${targetSector.replace(/_/g, " ")} (β = ${(SECTOR_BETAS[targetSector] ?? 1.0).toFixed(2)})`}
@@ -461,7 +448,7 @@ function ScenarioLab() {
                     <SelectItem value="pharma">Pharma & Healthcare (β = 0.60)</SelectItem>
                   </SelectContent>
                 </Select>
-                <div className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
+                <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">
                   <span>
                     {targetSector === "all_cyclical"
                       ? "Applies to Construction, Hospitality, Auto, Textiles, Transport"
@@ -492,7 +479,7 @@ function ScenarioLab() {
                   step={5}
                   onValueChange={(v) => setSectorStress(v[0])}
                 />
-                <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
+                <div className="mt-1 flex justify-between text-[11px] text-muted-foreground">
                   <span>0% (Neutral)</span>
                   <span>+50% (Severe)</span>
                 </div>
@@ -553,9 +540,6 @@ function ScenarioLab() {
                   <span>ECL by Risk Grade — Baseline vs Stressed</span>
                   <HintIcon text="Compares pre-shock Baseline ECL (blue) against post-shock Stressed ECL (rose) across risk grades RG1–RG10. Higher risk tiers (RG7+) experience non-linear loss amplification under stress." />
                 </CardTitle>
-                <CardDescription className="text-xs">
-                  RG7+ grades absorb most of the shock — exactly where the watchlist committee intervenes.
-                </CardDescription>
               </div>
               <div className="flex items-center gap-3 text-xs">
                 <span className="inline-flex items-center gap-1">
@@ -636,9 +620,6 @@ function ScenarioLab() {
                   Sector Vulnerability Matrix
                   <HintIcon text="Industry macro-betas applied to the live IDBI portfolio. Beta > 1.0 reflects cyclical amplification; Beta < 1.0 reflects defensive resilience." />
                 </CardTitle>
-                <CardDescription className="text-xs">
-                  Industry macro-betas applied to the live IDBI portfolio. Higher beta indicates higher cyclical sensitivity.
-                </CardDescription>
               </div>
               <Badge variant="outline" className="text-xs font-normal">
                 {bySector.length} Sectors Active
@@ -707,7 +688,7 @@ function ScenarioLab() {
                         {s.sector.replace(/_/g, " ")}
                       </td>
                       <td className="px-4 py-2.5 tabular-nums">
-                        <Badge variant="outline" className={`text-[10px] font-normal ${s.beta >= 1.3 ? "border-rose-500/30 text-rose-600 bg-rose-500/10" : s.beta <= 0.85 ? "border-emerald-500/30 text-emerald-600 bg-emerald-500/10" : ""}`}>
+                        <Badge variant="outline" className={`text-[11px] font-normal ${s.beta >= 1.3 ? "border-rose-500/30 text-rose-600 bg-rose-500/10" : s.beta <= 0.85 ? "border-emerald-500/30 text-emerald-600 bg-emerald-500/10" : ""}`}>
                           β = {s.beta.toFixed(2)}
                         </Badge>
                       </td>
@@ -727,11 +708,11 @@ function ScenarioLab() {
                       </td>
                       <td className="px-4 py-2.5 text-right">
                         {targetSector === s.sector ? (
-                          <Badge variant="outline" className="text-[10px] font-medium border-rose-500/40 text-rose-600 bg-rose-500/15">
+                          <Badge variant="outline" className="text-[11px] font-medium border-rose-500/40 text-rose-600 bg-rose-500/15">
                             🎯 Target (+{sectorStress}%)
                           </Badge>
                         ) : targetSector === "all_cyclical" && s.beta >= 1.2 && sectorStress > 0 ? (
-                          <Badge variant="outline" className="text-[10px] font-normal border-amber-500/30 text-amber-600 bg-amber-500/10">
+                          <Badge variant="outline" className="text-[11px] font-normal border-amber-500/30 text-amber-600 bg-amber-500/10">
                             ⚡ Cyclical Shock
                           </Badge>
                         ) : (
@@ -741,7 +722,7 @@ function ScenarioLab() {
                               e.stopPropagation();
                               handleSelectTargetSector(s.sector);
                             }}
-                            className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-[10px] font-medium text-muted-foreground hover:text-primary hover:border-primary/40 hover:bg-primary/5 transition-colors cursor-pointer"
+                            className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:text-primary hover:border-primary/40 hover:bg-primary/5 transition-colors cursor-pointer"
                             title={`Set ${s.sector} as the target sector for simulation`}
                           >
                             <Target className="h-2.5 w-2.5" />
@@ -763,10 +744,10 @@ function ScenarioLab() {
           <FlaskConical className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
           <p className="text-xs leading-relaxed text-muted-foreground">
             Methodology: Each facility's calibrated PD is shifted in log-odds space by{" "}
-            <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
+            <code className="rounded bg-muted px-1 py-0.5 text-[11px]">
               β × (0.002 × repo_bps + 0.08 × gdp_drop)
             </code>{" "}
-            via the live backend <code className="rounded bg-muted px-1 py-0.5 text-[10px]">/scenario/simulate</code> service.
+            via the live backend <code className="rounded bg-muted px-1 py-0.5 text-[11px]">/scenario/simulate</code> service.
             Origination-year macro features were evaluated and discarded to prevent chronological distribution bias; scenario stress testing across the active book provides actionable controlling-office oversight without model degradation.
           </p>
         </CardContent>

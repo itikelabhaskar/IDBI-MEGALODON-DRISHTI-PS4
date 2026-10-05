@@ -1,5 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useCapabilities } from "@/lib/role-context";
+import { watchLabel } from "@/lib/plain-language";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +36,7 @@ import {
   Cell,
 } from "recharts";
 import { scoreBatchRecords, uploadBatch } from "@/lib/api";
+import { demoExtractCsv, demoExtractFinacleCsv, generateDemoExtract } from "@/lib/demo-extract";
 import { formatInr, formatInrCompact, formatPercent, ragTone } from "@/lib/format";
 import {
   Upload,
@@ -50,11 +53,13 @@ import {
   Sparkles,
   ArrowUpRight,
   HelpCircle,
+  Wand2,
 } from "lucide-react";
 import {
   GuidedTooltip,
   HintIcon,
 } from "@/components/drishti/guided-tooltip";
+import { PageApiDrawer } from "@/components/drishti/page-api-drawer";
 
 export const Route = createFileRoute("/batch")({
   component: BatchScreeningPage,
@@ -74,23 +79,29 @@ interface ScoredBatchRow {
   ecl: number;
   sma_watch: string;
   ews_count: number;
+  /** In the loan master (so its borrower page exists). False for screening-only runs. */
+  saved: boolean;
 }
 
 const SAMPLE_PORTFOLIO = [
-  { loan_id: "IDBI-MUM-8001", ticket_size: 5000000, sector: "auto_ancillary", cibil_score: 780, drawing_power_gap_pct: 0, demanded_vs_collected_ratio: 1.0, dpd: 0, lien_flag: 0, restructuring_flag: 0 },
+  { loan_id: "IDBI-MUM-8001", ticket_size: 5000000, sector: "auto_components", cibil_score: 780, drawing_power_gap_pct: 0, demanded_vs_collected_ratio: 1.0, dpd: 0, lien_flag: 0, restructuring_flag: 0 },
   { loan_id: "IDBI-MUM-8002", ticket_size: 3500000, sector: "textiles", cibil_score: 720, drawing_power_gap_pct: 8, demanded_vs_collected_ratio: 0.96, dpd: 5, lien_flag: 0, restructuring_flag: 0 },
-  { loan_id: "IDBI-PUN-8003", ticket_size: 2500000, sector: "pharmaceuticals", cibil_score: 660, drawing_power_gap_pct: 22, demanded_vs_collected_ratio: 0.88, dpd: 28, lien_flag: 0, restructuring_flag: 0 },
-  { loan_id: "IDBI-PUN-8004", ticket_size: 8000000, sector: "engineering", cibil_score: 590, drawing_power_gap_pct: 35, demanded_vs_collected_ratio: 0.72, dpd: 62, lien_flag: 1, restructuring_flag: 0 },
+  { loan_id: "IDBI-PUN-8003", ticket_size: 2500000, sector: "pharma", cibil_score: 660, drawing_power_gap_pct: 22, demanded_vs_collected_ratio: 0.88, dpd: 28, lien_flag: 0, restructuring_flag: 0 },
+  { loan_id: "IDBI-PUN-8004", ticket_size: 8000000, sector: "construction", cibil_score: 590, drawing_power_gap_pct: 35, demanded_vs_collected_ratio: 0.72, dpd: 62, lien_flag: 1, restructuring_flag: 0 },
   { loan_id: "IDBI-DEL-8005", ticket_size: 1500000, sector: "retail_trade", cibil_score: 750, drawing_power_gap_pct: 4, demanded_vs_collected_ratio: 0.99, dpd: 0, lien_flag: 0, restructuring_flag: 0 },
   { loan_id: "IDBI-DEL-8006", ticket_size: 4200000, sector: "food_processing", cibil_score: 610, drawing_power_gap_pct: 28, demanded_vs_collected_ratio: 0.78, dpd: 45, lien_flag: 0, restructuring_flag: 1 },
-  { loan_id: "IDBI-BLR-8007", ticket_size: 6000000, sector: "auto_ancillary", cibil_score: 790, drawing_power_gap_pct: 0, demanded_vs_collected_ratio: 1.0, dpd: 0, lien_flag: 0, restructuring_flag: 0 },
+  { loan_id: "IDBI-BLR-8007", ticket_size: 6000000, sector: "auto_components", cibil_score: 790, drawing_power_gap_pct: 0, demanded_vs_collected_ratio: 1.0, dpd: 0, lien_flag: 0, restructuring_flag: 0 },
   { loan_id: "IDBI-BLR-8008", ticket_size: 3000000, sector: "textiles", cibil_score: 640, drawing_power_gap_pct: 18, demanded_vs_collected_ratio: 0.89, dpd: 21, lien_flag: 0, restructuring_flag: 0 },
-  { loan_id: "IDBI-HYD-8009", ticket_size: 7500000, sector: "engineering", cibil_score: 560, drawing_power_gap_pct: 42, demanded_vs_collected_ratio: 0.65, dpd: 75, lien_flag: 1, restructuring_flag: 1 },
+  { loan_id: "IDBI-HYD-8009", ticket_size: 7500000, sector: "it_services", cibil_score: 560, drawing_power_gap_pct: 42, demanded_vs_collected_ratio: 0.65, dpd: 75, lien_flag: 1, restructuring_flag: 1 },
   { loan_id: "IDBI-CHN-8010", ticket_size: 2000000, sector: "retail_trade", cibil_score: 760, drawing_power_gap_pct: 2, demanded_vs_collected_ratio: 0.98, dpd: 0, lien_flag: 0, restructuring_flag: 0 },
 ];
 
 export function BatchScreeningPage() {
+  const caps = useCapabilities();
   const [rows, setRows] = useState<any[]>(SAMPLE_PORTFOLIO);
+  // Built-in sample and generated demo books are never written to the loan
+  // master, whichever button screens them; only an officer's own upload is.
+  const [rowsAreDemo, setRowsAreDemo] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [scoredRows, setScoredRows] = useState<ScoredBatchRow[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -101,6 +112,7 @@ export function BatchScreeningPage() {
   const [progressStep, setProgressStep] = useState<string>("");
   const [showProgress, setShowProgress] = useState<boolean>(false);
   const [highlightTable, setHighlightTable] = useState<boolean>(false);
+  const [detectedMappings, setDetectedMappings] = useState<Array<{ original: string; mapped: string }>>([]);
 
   const handleScrollToTable = (filter?: "all" | "watchlist") => {
     if (filter) setStageFilter(filter);
@@ -110,7 +122,10 @@ export function BatchScreeningPage() {
     setTimeout(() => setHighlightTable(false), 2500);
   };
 
-  const runBatchScreening = async (dataToScore: any[]) => {
+  // `persist` writes the scored rows into the loan master. Only an officer's own
+  // upload does that; the demo sample shown on page load must not enter the book.
+  const runBatchScreening = async (dataToScore: any[], persist = true) => {
+    let usedOffline = false;
     setIsProcessing(true);
     setShowProgress(true);
     setProgressPct(15);
@@ -121,7 +136,8 @@ export function BatchScreeningPage() {
     setProgressStep("2/4: Running 3-Param Beta Calibrated LightGBM inference...");
 
     // 1. Attempt batch scoring & persistence via live API
-    const liveBatch = await uploadBatch(dataToScore, "msme_idbi");
+    // One request either way; persist=false scores without writing to the loan master.
+    const liveBatch = await uploadBatch(dataToScore, "msme_idbi", { persist });
 
     setProgressPct(75);
     setProgressStep("3/4: Evaluating 19 RBI Early Warning Signals (Finacle EWS)...");
@@ -145,6 +161,8 @@ export function BatchScreeningPage() {
         ecl: Number(r.ecl ?? 0),
         sma_watch: String(r.sma_watch ?? r.sma_status ?? "Standard"),
         ews_count: Number(r.ews_count ?? (r.ews_triggers?.length ?? 0)),
+        // Rows repeating an account already in the book are scored but not saved.
+        saved: liveBatch.persisted !== false && !(liveBatch.skipped_existing ?? []).includes(String(r.loan_id)),
       }));
       setScoredRows(normalized);
       setBatchRunId(liveBatch.run_id);
@@ -152,6 +170,7 @@ export function BatchScreeningPage() {
     } else {
       // 2. Fallback to client-side loop
       const results = await scoreBatchRecords("msme_idbi", dataToScore);
+      usedOffline = results.some((r) => r.status === "fallback");
       const enriched: ScoredBatchRow[] = dataToScore.map((row, i) => {
         const s = results[i] || {};
         const isError = s.status === "error";
@@ -175,6 +194,7 @@ export function BatchScreeningPage() {
           ecl: ecl,
           sma_watch: s.sma_watch ?? "Standard",
           ews_count: s.ews?.signals?.length ?? 0,
+          saved: false,
         };
       });
 
@@ -183,15 +203,27 @@ export function BatchScreeningPage() {
     }
 
     setProgressPct(100);
-    setProgressStep("Batch screening complete — scored facilities loaded!");
-    setTimeout(() => {
-      setShowProgress(false);
-    }, 2000);
+    const skipped = liveBatch?.skipped_existing ?? [];
+    setProgressStep(
+      usedOffline
+        ? "Scoring API not reachable — figures below come from the offline reference scorer (approximate)."
+        : liveBatch?.status === "success" && liveBatch.persisted !== false
+          ? `Scored ${dataToScore.length}; ${liveBatch.saved_accounts ?? dataToScore.length} saved to the portfolio` +
+            (skipped.length ? `; ${skipped.length} already in the book, not overwritten (${skipped.slice(0, 3).join(", ")}${skipped.length > 3 ? "…" : ""})` : "") +
+            "."
+          : `Scored ${dataToScore.length} accounts for screening only; nothing was saved to the portfolio.`,
+    );
+    // Keep the notice up when something needs reading; a clean save auto-hides.
+    if (!usedOffline && skipped.length === 0 && liveBatch?.status === "success" && liveBatch.persisted !== false) {
+      setTimeout(() => {
+        setShowProgress(false);
+      }, 2000);
+    }
     setIsProcessing(false);
   };
 
   useEffect(() => {
-    runBatchScreening(SAMPLE_PORTFOLIO);
+    runBatchScreening(SAMPLE_PORTFOLIO, false);
   }, []);
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -207,7 +239,40 @@ export function BatchScreeningPage() {
         });
         return;
       }
-      const headers = lines[0].split(",").map((h) => h.trim());
+      const FINACLE_COLUMN_ALIASES: Record<string, string> = {
+        acct_num: "loan_id",
+        account_number: "loan_id",
+        loan_account_no: "loan_id",
+        sanct_lim: "ticket_size",
+        sanction_limit: "ticket_size",
+        drw_pwr: "drawing_power",
+        dp_gap: "drawing_power_gap_pct",
+        drawing_power_gap: "drawing_power_gap_pct",
+        demand_coll_ratio: "demanded_vs_collected_ratio",
+        coll_ratio: "demanded_vs_collected_ratio",
+        cibil: "cibil_score",
+        days_past_due: "dpd",
+        overdue_dpd: "dpd",
+        bounces: "emi_bounce_6m",
+        chq_rtn: "emi_bounce_6m",
+        lien: "lien_flag",
+        restructuring: "restructuring_flag",
+        resched: "restructuring_flag",
+      };
+
+      const mappedList: Array<{ original: string; mapped: string }> = [];
+      const headers = lines[0].split(",").map((h) => {
+        const raw = h.trim();
+        const clean = raw.toLowerCase().replace(/[\s\-_]+/g, "_");
+        const mapped = FINACLE_COLUMN_ALIASES[clean] || raw;
+        if (FINACLE_COLUMN_ALIASES[clean]) {
+          mappedList.push({ original: raw, mapped });
+        }
+        return mapped;
+      });
+      if (mappedList.length > 0) {
+        setDetectedMappings(mappedList);
+      }
       const parsed = lines.slice(1).map((line) => {
         const parts = line.split(",").map((p) => p.trim());
         const row: Record<string, any> = {};
@@ -218,13 +283,46 @@ export function BatchScreeningPage() {
         return row;
       });
       setRows(parsed);
+      // A re-uploaded demo extract (DEMO-… IDs) is screened, not saved into the book.
+      const isDemo = parsed.length > 0 && parsed.every((r) => String(r.loan_id ?? "").startsWith("DEMO-"));
+      setRowsAreDemo(isDemo);
       toast.success(`Loaded ${parsed.length} accounts from Finacle extract`, {
-        description: "Executing automated batch scoring across pipeline stages...",
+        description: mappedList.length > 0
+          ? `Auto-detected ${mappedList.length} Finacle core banking column mappings.`
+          : "Executing automated batch scoring across pipeline stages...",
       });
-      runBatchScreening(parsed);
+      runBatchScreening(parsed, caps.canSaveBatch && !isDemo);
     };
     reader.readAsText(file);
     event.target.value = "";
+  };
+
+  // Demo book: a seeded synthetic extract at portfolio scale, screened only.
+  const [demoSize, setDemoSize] = useState(500);
+  const [demoSeed, setDemoSeed] = useState(2026);
+  const generateDemoBook = () => {
+    const book = generateDemoExtract(demoSize, demoSeed);
+    setRows(book);
+    setRowsAreDemo(true);
+    setSearchQuery("");
+    setStageFilter("all");
+    runBatchScreening(book, false);
+    toast.success(`Generated a synthetic ${demoSize}-account extract (seed ${demoSeed})`, {
+      description: "Scored for screening only; nothing is saved to the portfolio.",
+    });
+    setDemoSeed((x) => x + 1);
+  };
+  const downloadLoadedCsv = (finacle = false) => {
+    const text = finacle ? demoExtractFinacleCsv(rows as never) : demoExtractCsv(rows as never);
+    const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = finacle ? `FINACLE_EXTRACT_${rows.length}.csv` : `DRISHTI_demo_extract_${rows.length}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const downloadTemplate = () => {
@@ -319,25 +417,12 @@ export function BatchScreeningPage() {
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-muted-foreground">
-            <span>Finacle Batch Portfolio Screener · Controlling Office Ops</span>
-            {batchRunId && (
-              <Badge
-                variant="outline"
-                className="border-emerald-500/40 text-emerald-600 bg-emerald-500/10 font-mono text-[9px] px-1.5 py-0 h-4"
-              >
-                {isLive ? `Live Run: ${batchRunId}` : "Client Mode"}
-              </Badge>
-            )}
-          </div>
-          <h1 className="mt-1 text-xl font-semibold text-foreground">
+          <h1 className="text-xl font-semibold text-foreground">
             Batch Portfolio Risk Screening
           </h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            Ingest Finacle branch extracts, evaluate 12-month PD across all facilities, and calculate Ind AS 109 portfolio provisions.
-          </p>
         </div>
         <div className="flex items-center gap-2">
+          <PageApiDrawer routePath="/batch" triggerLabel="Batch Ingestion APIs" />
           <GuidedTooltip content="Download Finacle-compatible sample CSV template containing 10 pre-formatted commercial loan records ready for batch screening.">
             <Button variant="outline" size="sm" onClick={downloadTemplate} className="gap-1.5 text-xs">
               <Download className="h-3.5 w-3.5" /> CSV Template
@@ -346,7 +431,7 @@ export function BatchScreeningPage() {
           <GuidedTooltip content="Execute batch credit scoring across all loaded accounts to generate 12-month PD, credit grades, and Ind AS 109 provisions.">
             <Button
               size="sm"
-              onClick={() => runBatchScreening(rows)}
+              onClick={() => runBatchScreening(rows, caps.canSaveBatch && !rowsAreDemo)}
               disabled={isProcessing || rows.length === 0}
               className="gap-1.5 bg-primary text-primary-foreground text-xs"
             >
@@ -358,7 +443,9 @@ export function BatchScreeningPage() {
               ) : (
                 <>
                   <Play className="h-3.5 w-3.5" />
-                  <span>Screen Batch ({rows.length} Accounts)</span>
+                  <span>
+                    Screen {rowsAreDemo ? "demo book" : "batch"} ({rows.length.toLocaleString("en-IN")} accounts)
+                  </span>
                 </>
               )}
             </Button>
@@ -389,7 +476,7 @@ export function BatchScreeningPage() {
                 style={{ width: `${progressPct}%` }}
               />
             </div>
-            <div className="grid grid-cols-4 gap-1 pt-1 text-[10px] text-muted-foreground">
+            <div className="grid grid-cols-4 gap-1 pt-1 text-[11px] text-muted-foreground">
               <div className={cn("text-center truncate", progressPct >= 15 && "text-primary font-medium")}>
                 1. CSV Ingest
               </div>
@@ -414,9 +501,6 @@ export function BatchScreeningPage() {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle className="text-sm font-semibold">Upload Finacle Account Extract</CardTitle>
-                <CardDescription className="text-xs">
-                  Upload a .csv containing account particulars (sanction_limit, drawing_power, demanded_vs_collected, cibil).
-                </CardDescription>
               </div>
               <HintIcon text="Format: loan_id, ticket_size, sector, cibil_score, drawing_power_gap_pct, demanded_vs_collected_ratio, dpd, lien_flag, restructuring_flag" />
             </div>
@@ -430,7 +514,7 @@ export function BatchScreeningPage() {
                   <div className="text-[11px] leading-tight text-muted-foreground">
                     File must contain column headers matching Finacle extract:
                   </div>
-                  <div className="font-mono text-[10px] space-y-0.5 bg-muted/60 p-1.5 rounded border border-border">
+                  <div className="font-mono text-[11px] space-y-0.5 bg-muted/60 p-1.5 rounded border border-border">
                     <div>• loan_id: Unique account ID</div>
                     <div>• ticket_size: Sanctioned limit in ₹</div>
                     <div>• sector: Industry sector</div>
@@ -444,7 +528,7 @@ export function BatchScreeningPage() {
                 </div>
               }
             >
-              <div className="relative flex-1 w-full border-2 border-dashed border-border rounded-lg p-4 text-center hover:bg-muted/30 transition-colors cursor-pointer group">
+              <div className="relative w-full sm:w-52 sm:shrink-0 border-2 border-dashed border-border rounded-lg p-4 text-center hover:bg-muted/30 transition-colors cursor-pointer group">
                 <Upload className="h-6 w-6 text-muted-foreground mx-auto mb-1 group-hover:text-primary transition-colors" />
                 <span className="font-medium text-foreground group-hover:text-primary transition-colors">
                   Click to upload CSV
@@ -475,10 +559,53 @@ export function BatchScreeningPage() {
                   variant="ghost"
                   size="sm"
                   className="text-xs text-primary p-0 h-7"
-                  onClick={() => setRows(SAMPLE_PORTFOLIO)}
+                  onClick={() => {
+                    setRows(SAMPLE_PORTFOLIO);
+                    setRowsAreDemo(true);
+                    runBatchScreening(SAMPLE_PORTFOLIO, false);
+                  }}
                 >
                   Reset Sample Book
                 </Button>
+              </div>
+              <div className="mt-3 rounded-md border border-dashed border-primary/30 bg-primary/5 p-2.5 space-y-2">
+                <div className="text-xs font-medium flex items-center gap-1.5">
+                  <Wand2 className="h-3.5 w-3.5 text-primary" /> Demo book generator
+                  <span className="font-normal text-muted-foreground">· synthetic, screening only</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={demoSize}
+                    onChange={(e) => setDemoSize(Number(e.target.value))}
+                    className="h-7 rounded-md border border-input bg-background px-2 text-xs"
+                    aria-label="Number of accounts to generate"
+                  >
+                    {[100, 250, 500, 1000, 2000].map((n) => (
+                      <option key={n} value={n}>
+                        {n.toLocaleString("en-IN")} accounts
+                      </option>
+                    ))}
+                  </select>
+                  <Button size="sm" className="h-7 text-xs gap-1" onClick={generateDemoBook} disabled={isProcessing}>
+                    <Wand2 className="h-3 w-3" /> Generate &amp; screen
+                  </Button>
+                  <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => downloadLoadedCsv(false)}>
+                    <Download className="h-3 w-3" /> Download loaded CSV
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs gap-1"
+                    onClick={() => downloadLoadedCsv(true)}
+                    title="Same rows with Finacle column names (ACCT_NUM, SANCT_LIM, DRW_PWR…); upload it to see the column mapping"
+                  >
+                    <Download className="h-3 w-3" /> Finacle-format CSV
+                  </Button>
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-snug">
+                  Builds a Finacle-style extract with an MSME-like mix (about 1 in 9 accounts stressed), scores
+                  every row with the live model, and shows the book below. Use the CSV to demo the upload path.
+                </p>
               </div>
             </div>
           </CardContent>
@@ -487,9 +614,6 @@ export function BatchScreeningPage() {
         <Card className="sm:col-span-4 bg-surface">
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-semibold">Batch Pipeline Spec</CardTitle>
-            <CardDescription className="text-xs">
-              Direct execution against native IDBI model.
-            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-1.5 text-xs text-muted-foreground">
             <div className="flex justify-between">
@@ -512,13 +636,46 @@ export function BatchScreeningPage() {
         </Card>
       </div>
 
+      {/* Finacle Column Alias Auto-Detection Confirmation Chips */}
+      {detectedMappings.length > 0 && (
+        <Card className="bg-surface border-emerald-500/30 bg-emerald-500/5 shadow-xs">
+          <CardContent className="py-3 px-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                <span className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                  Finacle column names recognised ({detectedMappings.length} column aliases recognized)
+                </span>
+              </div>
+              <span className="text-[11px] text-muted-foreground">
+                Recognised Finacle column names mapped to model fields
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
+              {detectedMappings.map((m, idx) => (
+                <Badge
+                  key={idx}
+                  variant="outline"
+                  className="font-mono text-[11px] bg-background/90 border-emerald-500/30 text-foreground py-0.5 px-2"
+                >
+                  <span className="text-muted-foreground font-medium">{m.original}</span>
+                  <span className="mx-1 text-emerald-600 font-bold">→</span>
+                  <span className="text-emerald-700 dark:text-emerald-300 font-semibold">{m.mapped}</span>
+                  <span className="ml-1 text-emerald-600">✓</span>
+                </Badge>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* KPI Tiles when Scored */}
       {kpis && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <GuidedTooltip content="Aggregate sanctioned credit limit across all active facilities in the loaded batch extract.">
             <Card className="bg-surface transition-shadow hover:shadow-sm">
               <CardContent className="pt-4">
-                <div className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1">
+                <div className="text-[11px] uppercase tracking-widest text-muted-foreground flex items-center gap-1">
                   <span>Total Sanctioned Book</span>
                   <HintIcon text="Total exposure volume active in batch run." />
                 </div>
@@ -531,7 +688,7 @@ export function BatchScreeningPage() {
           <GuidedTooltip content="Exposure-weighted 12-month probability of default across the entire batch book.">
             <Card className="bg-surface transition-shadow hover:shadow-sm">
               <CardContent className="pt-4">
-                <div className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center gap-1">
+                <div className="text-[11px] uppercase tracking-widest text-muted-foreground flex items-center gap-1">
                   <span>Weighted Average PD</span>
                   <HintIcon text="Calibrated 12M PD weighted by facility ticket size." />
                 </div>
@@ -547,9 +704,9 @@ export function BatchScreeningPage() {
               onClick={() => handleScrollToTable()}
             >
               <CardContent className="pt-4">
-                <div className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center justify-between">
+                <div className="text-[11px] uppercase tracking-widest text-muted-foreground flex items-center justify-between">
                   <span>Total Ind AS 109 ECL</span>
-                  <span className="text-[9px] text-primary opacity-0 group-hover:opacity-100 transition-opacity">
+                  <span className="text-[11px] text-primary opacity-0 group-hover:opacity-100 transition-opacity">
                     View roster ↓
                   </span>
                 </div>
@@ -559,7 +716,7 @@ export function BatchScreeningPage() {
             </Card>
           </GuidedTooltip>
 
-          <GuidedTooltip content="Facilities classified in Stage 2 (SICR), Stage 3 (Impaired), or triggering SMA watch. Click to filter table to watchlist accounts ↓">
+          <GuidedTooltip content="Accounts in Stage 2 (risk has risen materially), Stage 3 (impaired) or on early watch. Click to filter the table to them ↓">
             <Card
               className={cn(
                 "bg-surface cursor-pointer transition-all hover:border-amber-500/50 hover:shadow-sm group",
@@ -568,16 +725,16 @@ export function BatchScreeningPage() {
               onClick={() => handleScrollToTable("watchlist")}
             >
               <CardContent className="pt-4">
-                <div className="text-[10px] uppercase tracking-widest text-muted-foreground flex items-center justify-between">
+                <div className="text-[11px] uppercase tracking-widest text-muted-foreground flex items-center justify-between">
                   <span>Watchlist Accounts</span>
-                  <span className="text-[9px] text-primary opacity-0 group-hover:opacity-100 transition-opacity">
+                  <span className="text-[11px] text-primary opacity-0 group-hover:opacity-100 transition-opacity">
                     Filter Watchlist ↓
                   </span>
                 </div>
                 <div className="mt-1 text-xl font-bold font-mono text-foreground group-hover:text-amber-500 transition-colors">
                   {kpis.watchlistCount}
                 </div>
-                <div className="text-[11px] text-muted-foreground mt-0.5">Stage 2 / Stage 3 / SMA Watch</div>
+                <div className="text-[11px] text-muted-foreground mt-0.5">Stage 2 / Stage 3 / early watch</div>
               </CardContent>
             </Card>
           </GuidedTooltip>
@@ -586,7 +743,7 @@ export function BatchScreeningPage() {
 
       {/* Urgent Supervisory Action Alert Banner */}
       {kpis && kpis.watchlistCount > 0 && (
-        <GuidedTooltip content="Urgent Supervisory Queue: Accounts showing significant increase in credit risk (SICR) or payment default. Click to isolate watchlist accounts and scroll to table.">
+        <GuidedTooltip content="Urgent Supervisory Queue: Accounts whose risk has risen materially since sanction, or that are already in default. Click to isolate watchlist accounts and scroll to table.">
           <div
             onClick={() => handleScrollToTable("watchlist")}
             className="flex items-center justify-between p-3 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300 cursor-pointer hover:bg-amber-500/15 transition-all shadow-sm group"
@@ -639,7 +796,7 @@ export function BatchScreeningPage() {
                     <SelectItem value="all">All Stages</SelectItem>
                     <SelectItem value="watchlist">Watchlist (Stage 2/3 / Red)</SelectItem>
                     <SelectItem value="1">Stage 1 (12m)</SelectItem>
-                    <SelectItem value="2">Stage 2 (Life SICR)</SelectItem>
+                    <SelectItem value="2">Stage 2 (risk risen)</SelectItem>
                     <SelectItem value="3">Stage 3 (Impaired)</SelectItem>
                   </SelectContent>
                 </Select>
@@ -693,7 +850,7 @@ export function BatchScreeningPage() {
                   <TableHead className="text-xs bg-surface">
                     <span className="inline-flex items-center gap-1">
                       Stage
-                      <HintIcon text="Ind AS 109 classification: Stage 1 (12M), Stage 2 (Lifetime SICR), Stage 3 (Impaired)." />
+                      <HintIcon text="Provision stage: 1 = performing (12-month provision), 2 = risk has risen materially (lifetime provision), 3 = impaired (90+ days overdue)." />
                     </span>
                   </TableHead>
                   <TableHead className="text-xs bg-surface">
@@ -704,26 +861,33 @@ export function BatchScreeningPage() {
                   </TableHead>
                   <TableHead className="text-xs bg-surface pr-4">
                     <span className="inline-flex items-center gap-1">
-                      SMA Watch
-                      <HintIcon text="RBI Special Mention Account categorization (Standard, SMA-0, SMA-1, SMA-2)." />
+                      Model watch
+                      <HintIcon text="The model's early-watch bucket from the 12-month PD (No watch, Early watch 1–3). Not the RBI SMA status, which comes from days past due." />
                     </span>
                   </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredRows.map((r) => (
+                {filteredRows.slice(0, 500).map((r) => (
                   <TableRow key={r.loan_id}>
                     <TableCell className="font-mono font-medium text-xs pl-4">
-                      <GuidedTooltip content={`Open comprehensive underwriting & EWS diagnostic dossier for ${r.loan_id}`}>
-                        <Link
-                          to="/borrowers/$id"
-                          params={{ id: r.loan_id }}
-                          className="text-primary hover:underline inline-flex items-center gap-1 group font-medium"
-                        >
-                          <span>{r.loan_id}</span>
-                          <ArrowUpRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                        </Link>
-                      </GuidedTooltip>
+                      {r.saved ? (
+                        <GuidedTooltip content={`Open the borrower page for ${r.loan_id}`}>
+                          <Link
+                            to="/borrowers/$id"
+                            params={{ id: r.loan_id }}
+                            className="text-primary hover:underline inline-flex items-center gap-1 group font-medium"
+                          >
+                            <span>{r.loan_id}</span>
+                            <ArrowUpRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                          </Link>
+                        </GuidedTooltip>
+                      ) : (
+                        <span title="Screened only: not saved to the loan master, so there is no borrower page">
+                          {r.loan_id}
+                          <span className="ml-1 text-[11px] font-normal text-muted-foreground">not saved</span>
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell className="text-xs capitalize">{r.sector.replace(/_/g, " ")}</TableCell>
                     <TableCell className="font-mono text-xs">{formatInrCompact(r.ticket_size)}</TableCell>
@@ -736,16 +900,22 @@ export function BatchScreeningPage() {
                       <Badge className={ragTone[r.rag]}>{r.risk_grade}</Badge>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline" className="text-[10px]">
+                      <Badge variant="outline" className="text-[11px]">
                         Stage {r.ecl_stage}
                       </Badge>
                     </TableCell>
                     <TableCell className="font-mono text-xs text-rose-500">{formatInrCompact(r.ecl)}</TableCell>
-                    <TableCell className="text-xs pr-4">{r.sma_watch}</TableCell>
+                    <TableCell className="text-xs pr-4">{watchLabel(r.sma_watch)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
+            {filteredRows.length > 500 && (
+              <div className="border-t border-border px-4 py-2 text-[11px] text-muted-foreground">
+                Showing the first 500 of {filteredRows.length.toLocaleString("en-IN")} rows; the KPIs above and
+                &quot;Export CSV&quot; cover all of them.
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

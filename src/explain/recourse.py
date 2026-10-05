@@ -75,6 +75,22 @@ _IDBI_LEVERS: dict[str, Callable[[pd.DataFrame], None]] = {
     "Reduce sanctioned ticket size by 25%": _idbi_reduce_ticket,
 }
 
+# Who can pull each lever. A limit cut, more guarantee cover or extra security is
+# the bank's decision, not something to tell the borrower to do.
+BANK_LEVERS: set[str] = {
+    "Reduce sanctioned exposure by 25%",
+    "Reduce sanctioned exposure by 50%",
+    "Secure facility / extend to long-tenure (>=20y)",
+    "Increase guarantee cover to 85%",
+    "Reduce ticket size by 25% (partial limit cut)",
+    "Reduce sanctioned ticket size by 25%",
+}
+
+
+def lever_actor(label: str) -> str:
+    return "bank" if label in BANK_LEVERS else "borrower"
+
+
 SEGMENT_LEVERS: dict[str, dict[str, Callable[[pd.DataFrame], None]]] = {
     "msme_sba": _LEVERS,
     "msme_india": _INDIA_LEVERS,
@@ -86,6 +102,9 @@ def _pd_of(bundle, feat_row: pd.DataFrame) -> float:
     return float(bundle.predict_pd(feat_row[bundle.feature_cols])[0])
 
 
+# borrower actions first; bank actions (limit cuts, more cover) only if those leave
+# the pd above target. each change carries its actor, and borrower_pd is where the
+# borrower's own steps get to. with an ead, every step also carries its ecl.
 def recommend_recourse(
     bundle,
     feat_row: pd.DataFrame,
@@ -105,28 +124,33 @@ def recommend_recourse(
         expected_credit_loss(base_pd, ead, lgd_val) if ead is not None else None
     )
 
-    for _ in range(max_steps):
-        if _pd_of(bundle, current) <= target_pd:
-            break
-        best_label, best_pd, best_frame = None, _pd_of(bundle, current), None
-        for label, lever in levers.items():
-            if label in used:
-                continue
-            trial = current.copy()
-            lever(trial)
-            trial_pd = _pd_of(bundle, trial)
-            if trial_pd < best_pd - 1e-4:
-                best_label, best_pd, best_frame = label, trial_pd, trial
-        if best_label is None:
-            break
-        current = best_frame
-        used.add(best_label)
-        step: dict = {"change": best_label, "pd_after": round(best_pd, 4)}
-        if ead is not None and baseline_ecl is not None:
-            ecl_after = expected_credit_loss(best_pd, ead, lgd_val)
-            step["ecl_after"] = round(ecl_after, 2)
-            step["ecl_delta"] = round(ecl_after - baseline_ecl, 2)
-        applied.append(step)
+    borrower_pd = base_pd
+    # Up to `max_steps` borrower actions, then at most two bank actions.
+    for phase, phase_steps in (("borrower", max_steps), ("bank", 2)):
+        for _ in range(phase_steps):
+            if _pd_of(bundle, current) <= target_pd:
+                break
+            best_label, best_pd, best_frame = None, _pd_of(bundle, current), None
+            for label, lever in levers.items():
+                if label in used or lever_actor(label) != phase:
+                    continue
+                trial = current.copy()
+                lever(trial)
+                trial_pd = _pd_of(bundle, trial)
+                if trial_pd < best_pd - 1e-4:
+                    best_label, best_pd, best_frame = label, trial_pd, trial
+            if best_label is None:
+                break
+            current = best_frame
+            used.add(best_label)
+            step: dict = {"change": best_label, "actor": phase, "pd_after": round(best_pd, 4)}
+            if ead is not None and baseline_ecl is not None:
+                ecl_after = expected_credit_loss(best_pd, ead, lgd_val)
+                step["ecl_after"] = round(ecl_after, 2)
+                step["ecl_delta"] = round(ecl_after - baseline_ecl, 2)
+            applied.append(step)
+        if phase == "borrower":
+            borrower_pd = _pd_of(bundle, current)
 
     achieved_pd = _pd_of(bundle, current)
     out: dict = {
@@ -135,6 +159,8 @@ def recommend_recourse(
         "achieved_pd": round(achieved_pd, 4),
         "changes": applied,
         "target_met": achieved_pd <= target_pd,
+        "borrower_pd": round(borrower_pd, 4),
+        "borrower_target_met": borrower_pd <= target_pd,
     }
     if ead is not None and baseline_ecl is not None:
         achieved_ecl = expected_credit_loss(achieved_pd, ead, lgd_val)

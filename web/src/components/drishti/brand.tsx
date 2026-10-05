@@ -50,33 +50,25 @@ export function BrandLockup({
   className?: string;
 }) {
   return (
-    <div className={cn("flex items-center gap-2.5", className)}>
-      <BrandMark className="h-9 w-9" />
-      <div className="min-w-0 leading-tight">
-        <div
+    <div className={cn("flex items-center gap-2.5 min-w-0", className)}>
+      <BrandMark className="h-7 w-7 shrink-0" />
+      <div className="min-w-0 flex items-center gap-1.5 whitespace-nowrap">
+        <span
           className={cn(
-            "flex items-center whitespace-nowrap text-[15px] font-bold tracking-tight",
+            "text-[15px] font-bold tracking-tight",
             tone === "dark" ? "text-sidebar-foreground" : "text-foreground",
           )}
         >
           DRISHTI
-          <span
-            className={cn(
-              "text-[15px] font-semibold",
-              tone === "dark" ? "text-sidebar-foreground/85" : "text-primary",
-            )}
-          >
-            &nbsp;Risk Engine
-          </span>
-        </div>
-        <div
+        </span>
+        <span
           className={cn(
-            "whitespace-nowrap text-[10px] font-medium uppercase tracking-[0.14em]",
-            tone === "dark" ? "text-sidebar-foreground/55" : "text-muted-foreground",
+            "text-[11px] font-semibold uppercase tracking-wider",
+            tone === "dark" ? "text-sidebar-foreground/75" : "text-primary",
           )}
         >
-          12-Month Stress Horizon
-        </div>
+          Risk
+        </span>
       </div>
     </div>
   );

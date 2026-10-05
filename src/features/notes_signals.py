@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import pandas as pd
 
@@ -94,8 +96,40 @@ def generate_notes(df: pd.DataFrame, seed: int = SEED) -> pd.Series:
     return pd.Series(notes, index=df.index, name="officer_note")
 
 
+# --- PII masking before notes are analysed or stored -------------------------
+# Order matters: longer composite identifiers (GSTIN embeds a PAN; a 16-digit
+# card contains a 12-digit run) are masked before their parts.
+_PII_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\b\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]\b", re.I), "[REDACTED_GSTIN]"),
+    (re.compile(r"\bUDYAM-[A-Z]{2}-\d{2}-\d{7}\b", re.I), "[REDACTED_UDYAM]"),
+    (re.compile(r"\b[A-Z]{4}0[A-Z0-9]{6}\b", re.I), "[REDACTED_IFSC]"),
+    (re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b"), "[REDACTED_EMAIL]"),
+    (re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b", re.I), "[REDACTED_PAN]"),
+    (re.compile(r"\b(?:\d{4}[-\s]?){3}\d{4}\b"), "[REDACTED_CARD]"),
+    (re.compile(r"\b\d{4}[-\s]?\d{4}[-\s]?\d{4}\b"), "[REDACTED_AADHAAR]"),
+    (re.compile(r"(?:\+91[-\s]?|\b0)?\b[6-9]\d{4}[-\s]?\d{5}\b"), "[REDACTED_PHONE]"),
+    (re.compile(r"\b\d{9,18}\b"), "[REDACTED_ACCOUNT]"),
+]
+
+
+def sanitize_pii(text: str) -> str:
+    """Mask common Indian identifiers in free text (officer notes).
+
+    Covers GSTIN, Udyam number, IFSC, e-mail, PAN, card, Aadhaar, mobile and
+    9–18 digit account numbers. Pattern-based masking misses names and
+    addresses, so it reduces exposure; it is not by itself DPDP compliance.
+    """
+    if not text or not isinstance(text, str):
+        return ""
+    s = text
+    for pattern, token in _PII_PATTERNS:
+        s = pattern.sub(token, s)
+    return s
+
+
 def _keyword_extract(note: str) -> dict[str, float]:
-    low = note.lower()
+    sanitized = sanitize_pii(note)
+    low = sanitized.lower()
     neg = sum(1 for k in _NEG_KEYWORDS if k in low)
     pos = sum(1 for k in _POS_KEYWORDS if k in low)
     return {
@@ -122,7 +156,7 @@ def finbert_sentiment(notes: pd.Series, batch_size: int = 64) -> pd.Series:
         top_k=None, truncation=True, max_length=256, device=device,
     )
     scores: list[float] = []
-    texts = [str(n)[:1000] for n in notes]
+    texts = [sanitize_pii(str(n)[:1000]) for n in notes]
     for i in range(0, len(texts), batch_size):
         for res in clf(texts[i:i + batch_size], batch_size=batch_size):
             d = {r["label"]: r["score"] for r in res}
@@ -137,10 +171,11 @@ def extract_note_signals(
         schema = {s: "float" for s in NOTE_SIGNALS}
         rows = []
         for note in notes:
+            sanitized = sanitize_pii(str(note))
             try:
-                rows.append({k: float(v) for k, v in llm.extract(str(note), schema).items()})
+                rows.append({k: float(v) for k, v in llm.extract(sanitized, schema).items()})
             except Exception:
-                rows.append(_keyword_extract(str(note)))
+                rows.append(_keyword_extract(sanitized))
         return pd.DataFrame(rows, index=notes.index)[NOTE_SIGNALS]
 
     out = pd.DataFrame(

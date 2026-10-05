@@ -1,3 +1,5 @@
+import { useEffect, useMemo, useState } from "react";
+import { useScopeBranch } from "../role-context";
 import type {
   BorrowerScore,
   BranchSummary,
@@ -176,16 +178,39 @@ export function getBorrower(id: string): BorrowerScore | undefined {
 export async function fetchBorrower(id: string): Promise<BorrowerScore | null> {
   try {
     const res = await fetchWithTimeout(`/api/borrowers/${encodeURIComponent(id)}`);
-    if (!res.ok) return null;
-    return (await res.json()) as BorrowerScore;
+    if (res.ok) return (await res.json()) as BorrowerScore;
   } catch {
-    return null;
+    // fall through to the snapshot
   }
+  // The sandbox database is seeded from this snapshot, so a deployment without
+  // the API finds the same account the live one would, instead of "not found".
+  const key = id.trim().toUpperCase();
+  return snapshot.borrowers.find((b) => b.loan_id.toUpperCase() === key) ?? null;
 }
 
 /** Branch rollup, riskiest first (the controlling office's reading order). */
 export function listBranches(): BranchSummary[] {
   return snapshot.branches ?? [];
+}
+
+/**
+ * The book every page should show: the snapshot on first render, then the live
+ * loan master once the API answers (new proposals, batch saves and re-ratings).
+ */
+export function useBook(): BorrowerScore[] {
+  const [book, setBook] = useState<BorrowerScore[]>(() => snapshot.borrowers);
+  const scope = useScopeBranch();
+  useEffect(() => {
+    let active = true;
+    fetchPortfolio({ limit: 2000 }).then((r) => {
+      if (active && r && r.source.mode === "live") setBook(r.borrowers);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+  // A branch officer's book is their branch, on every page that reads it.
+  return useMemo(() => (scope ? book.filter((b) => b.branch_code === scope) : book), [book, scope]);
 }
 
 export async function fetchBranches(): Promise<BranchSummary[]> {
@@ -202,13 +227,17 @@ export async function fetchBranches(): Promise<BranchSummary[]> {
 
 export async function submitUnderwriting(
   payload: UnderwriteSubmitPayload,
-): Promise<{ status: string; loan_id: string; borrower?: any; decision?: any } | null> {
+): Promise<{ status: string; loan_id: string; borrower?: any; decision?: any; detail?: string } | null> {
   try {
     const res = await fetchWithTimeout("/api/underwrite/submit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+    if (res.status === 409 || res.status === 404) {
+      const body = await res.json().catch(() => null);
+      return { status: "conflict", loan_id: payload.loan_id, detail: body?.detail };
+    }
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -219,6 +248,7 @@ export async function submitUnderwriting(
 export async function uploadBatch(
   records: Record<string, unknown>[],
   segment: string = "msme_idbi",
+  opts: { persist?: boolean } = {},
 ): Promise<{
   status: string;
   run_id: string;
@@ -229,13 +259,22 @@ export async function uploadBatch(
   max_pd: number;
   grade_distribution?: Record<string, number>;
   scored_records: any[];
+  saved_accounts?: number;
+  skipped_existing?: string[];
+  persisted?: boolean;
 } | null> {
+  const persist = opts.persist ?? true;
   try {
-    const res = await fetchWithTimeout("/api/batch/upload", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ records, segment }),
-    });
+    // Large extracts take a while to score; allow ~60 ms a row plus headroom.
+    const res = await fetchWithTimeout(
+      "/api/batch/upload",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ records, segment, persist }),
+      },
+      Math.max(8000, records.length * 60 + 5000),
+    );
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -263,20 +302,90 @@ export async function fetchGovernanceMetrics(): Promise<GovernanceMetrics | null
   }
 }
 
-export async function fetchAllDecisions(limit: number = 50): Promise<DecisionRecord[]> {
+// Decisions taken while the API is unreachable (the static Space) are kept on
+// this browser so the committee dialog, the portfolio row and the governance
+// audit trail still agree. They are marked `local` wherever they are shown.
+const LOCAL_DECISIONS_KEY = "drishti.decisions.local.v1";
+
+export type LocalDecision = DecisionRecord & { local: true };
+
+function readLocalDecisions(): LocalDecision[] {
   try {
-    const res = await fetchWithTimeout(`/api/decisions?limit=${limit}`);
-    if (!res.ok) return [];
-    return (await res.json()) as DecisionRecord[];
+    const raw = typeof window === "undefined" ? null : localStorage.getItem(LOCAL_DECISIONS_KEY);
+    return raw ? (JSON.parse(raw) as LocalDecision[]) : [];
   } catch {
     return [];
   }
 }
 
+function saveLocalDecision(d: DecisionCreate): void {
+  try {
+    const rec: LocalDecision = {
+      id: `LOCAL-${Date.now()}`,
+      loan_id: d.loan_id,
+      segment: d.segment,
+      decision: d.decision,
+      original_grade: d.original_grade ?? d.risk_grade,
+      revised_grade: d.revised_grade,
+      override_action: d.override_action,
+      rationale: d.rationale,
+      decided_by: d.decided_by,
+      officer: d.officer ?? d.decided_by,
+      role: d.role,
+      ts: new Date().toISOString(),
+      local: true,
+    };
+    localStorage.setItem(LOCAL_DECISIONS_KEY, JSON.stringify([rec, ...readLocalDecisions()].slice(0, 500)));
+  } catch {
+    /* storage unavailable: the caller reports the decision as not saved */
+  }
+}
+
+const REVIEW_STATUS_BY_DECISION: Record<DecisionRecord["decision"], NonNullable<BorrowerScore["reviewed_status"]>> = {
+  accept: "REVIEWED",
+  override: "REVIEWED",
+  defer: "DEFERRED",
+  reject: "FLAGGED_SARB",
+  restructure: "RESTRUCTURE",
+};
+
+/** Review status implied by the latest decision kept on this browser, if any. */
+export function localReviewStatus(loanId: string): BorrowerScore["reviewed_status"] | undefined {
+  const latest = readLocalDecisions().find((d) => d.loan_id === loanId);
+  return latest ? REVIEW_STATUS_BY_DECISION[latest.decision] : undefined;
+}
+
+function newestFirst(a: DecisionRecord, b: DecisionRecord): number {
+  return String(b.ts ?? "").localeCompare(String(a.ts ?? ""));
+}
+
+export async function fetchAllDecisions(limit: number = 50): Promise<DecisionRecord[]> {
+  let server: DecisionRecord[] = [];
+  try {
+    const res = await fetchWithTimeout(`/api/decisions?limit=${limit}`);
+    if (res.ok) server = (await res.json()) as DecisionRecord[];
+  } catch {
+    /* offline: local decisions only */
+  }
+  return [...readLocalDecisions(), ...server].sort(newestFirst).slice(0, limit);
+}
+
 
 /** Shape returned by POST /score/{segment} in src/serving/api.py. */
+/** DPD-driven RBI SMA / Ind AS 109 floor, as returned by the scorer. */
+export interface RegulatoryOverlay {
+  rule: string;
+  dpd: number;
+  bucket: string;
+  stage_floor: number;
+  model_grade: string;
+  model_sma_watch: string;
+  applied: boolean;
+}
+
 interface ScoreResponse {
   status?: string;
+  message?: string;
   pd_12m?: number;
   risk_grade?: string;
   rag?: string;
@@ -289,6 +398,7 @@ interface ScoreResponse {
   lifetime_ecl?: number;
   currency?: string;
   coverage?: { status?: string };
+  regulatory_overlay?: RegulatoryOverlay | null;
   reason_codes?: Array<{
     feature: string;
     code?: string;
@@ -367,7 +477,10 @@ function mergeLive(base: BorrowerScore, res: ScoreResponse): LiveBorrower {
 export async function probeApi(signal?: AbortSignal): Promise<boolean> {
   try {
     const res = await fetchWithTimeout("/api/health", { signal });
-    return res.ok;
+    if (!res.ok) return false;
+    // A static host can answer any path with its HTML shell and a 200.
+    const body = (await res.json().catch(() => null)) as { status?: string } | null;
+    return body?.status === "ok";
   } catch {
     return false;
   }
@@ -379,11 +492,12 @@ export async function probeApi(signal?: AbortSignal): Promise<boolean> {
  * refusal). Never throws.
  */
 export async function scoreBorrowerLive(
-  id: string,
+  row: BorrowerScore,
   signal?: AbortSignal,
 ): Promise<{ borrower: LiveBorrower; source: DataSource } | null> {
-  const base = getBorrower(id);
-  if (!base) return null;
+  // Re-score the row the page loaded (the loan master when the API is up), not
+  // the bundled snapshot: after a re-rating the snapshot holds stale inputs.
+  const base = row;
 
   const raw = (base as BorrowerScore & { raw?: Record<string, unknown> }).raw;
   if (!raw || Object.keys(raw).length === 0) {
@@ -409,30 +523,38 @@ export async function scoreBorrowerLive(
 /**
  * Submit a human-in-the-loop credit committee decision.
  */
-export async function createDecision(decision: DecisionCreate): Promise<boolean> {
+export async function createDecision(decision: DecisionCreate): Promise<"persisted" | "local" | false> {
   try {
     const res = await fetchWithTimeout("/api/decisions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(decision),
     });
-    return res.ok;
+    if (res.ok) return "persisted";
+    // The API answered and refused (validation, unknown loan, server error):
+    // do not paper over that with a local copy.
+    if (await probeApi()) return false;
   } catch {
-    return false;
+    /* unreachable: fall through to the local record */
   }
+  const before = readLocalDecisions().length;
+  saveLocalDecision(decision);
+  return readLocalDecisions().length > before ? "local" : false;
 }
 
 /**
  * Fetch decision audit trail for a specific loan ID.
  */
 export async function fetchDecisions(loanId: string): Promise<DecisionRecord[]> {
+  let server: DecisionRecord[] = [];
   try {
     const res = await fetchWithTimeout(`/api/decisions/${encodeURIComponent(loanId)}`);
-    if (!res.ok) return [];
-    return (await res.json()) as DecisionRecord[];
+    if (res.ok) server = (await res.json()) as DecisionRecord[];
   } catch {
-    return [];
+    /* offline: local decisions only */
   }
+  const local = readLocalDecisions().filter((d) => d.loan_id === loanId);
+  return [...local, ...server].sort(newestFirst);
 }
 
 /**
@@ -455,7 +577,26 @@ export async function scoreRawBorrower(
       body: JSON.stringify(payload),
       signal,
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    // 422 is the API refusing to score (coverage gate), not an outage: pass the
+    // refusal through so the officer sees it instead of an offline estimate.
+    if (res.status === 422) {
+      const body = await res.json().catch(() => null);
+      const detail = body?.detail;
+      if (typeof detail === "string") {
+        return { status: "insufficient_data", message: `DRISHTI refused to score: ${detail}` } as ScoreResponse;
+      }
+      if (detail && typeof detail === "object" && detail.status === "insufficient_data") {
+        return { ...detail, status: "insufficient_data", message: detail.message } as ScoreResponse;
+      }
+    }
+    if (!res.ok) {
+      // Reachable API that failed (bad input, server error): say so. Only a
+      // missing API (static host, proxy with nothing behind it) gets the offline scorer.
+      if (await probeApi()) {
+        return { status: "error", message: `The scoring API returned an error (HTTP ${res.status}).` } as ScoreResponse;
+      }
+      throw new Error(`HTTP ${res.status}`);
+    }
     return (await res.json()) as ScoreResponse;
   } catch {
     // A caller-initiated abort is not an API outage — let it stay unanswered
@@ -480,27 +621,26 @@ export async function scoreBatchRecords(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(rec),
       });
+      // Only a 422 is the API declining to score; any other failure (404 on the
+      // static Space, 401 with a key set, 5xx from the proxy) means no live model.
+      if (!res.ok && res.status !== 422) throw new Error(`HTTP ${res.status}`);
       if (res.ok) {
         results.push((await res.json()) as ScoreResponse);
       } else {
+        // The API answered but would not score (e.g. refuse-to-score on thin data).
         results.push({
           status: "error",
           pd_12m: 0.0,
           risk_grade: "UNRATED",
           rag: "Amber",
-          sma_watch: "Scoring Offline",
+          sma_watch: "Not scored",
           ecl_stage: 1,
         });
       }
     } catch {
-      results.push({
-        status: "error",
-        pd_12m: 0.0,
-        risk_grade: "UNRATED",
-        rag: "Amber",
-        sma_watch: "Scoring Offline",
-        ecl_stage: 1,
-      });
+      // API unreachable: same offline reference scorer as the appraisal screen,
+      // flagged "fallback" so the page can say the figures are approximate.
+      results.push(offlineScore(segment, rec as OfflineScoreInput) as ScoreResponse);
     }
   }
   return results;
@@ -726,3 +866,143 @@ export async function simulateContagion(
 }
 
 
+
+
+
+
+// ---------------------------------------------------------------------------
+// Unstructured inputs: read an officer note or a bank statement for one account
+// and re-score it. Analysis only; the API saves nothing. Null when no API.
+// ---------------------------------------------------------------------------
+
+export interface UnstructuredVerdict {
+  pd_12m: number | null;
+  risk_grade: string | null;
+  rag: string | null;
+  ecl_stage: number | null;
+  ecl: number | null;
+}
+
+export interface NoteAnalysis {
+  loan_id: string;
+  segment: string;
+  masked_text: string;
+  pii_masked: boolean;
+  method: string;
+  finbert_tone: number | null;
+  signals: { key: string; label: string; value: number }[];
+  model_uses_notes: boolean;
+  before: UnstructuredVerdict;
+  after: UnstructuredVerdict;
+  /** Uncalibrated model score; the PD is read from it through stepped (isotonic) calibration. */
+  raw_score?: { before: number | null; after: number | null };
+}
+
+export interface StatementAnalysis {
+  loan_id: string;
+  segment: string;
+  transactions: number;
+  period: { from: string | null; to: string | null };
+  derived: Record<string, number>;
+  model_inputs_updated: Record<string, number>;
+  /** What the model used before: stored values, or inferred ones for keys in inputs_were_inferred. */
+  stored_inputs?: Record<string, number | null>;
+  inputs_were_inferred?: string[];
+  before: UnstructuredVerdict;
+  after: UnstructuredVerdict;
+  /** Uncalibrated model score; the PD is read from it through stepped (isotonic) calibration. */
+  raw_score?: { before: number | null; after: number | null };
+}
+
+async function postJson<T>(path: string, body: unknown): Promise<T | { error: string } | null> {
+  try {
+    const res = await fetchWithTimeout(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }, 30000);
+    if (res.ok) return (await res.json()) as T;
+    const detail = (await res.json().catch(() => null))?.detail;
+    if (res.status === 404 || res.status === 422) {
+      return { error: typeof detail === "string" ? detail : "The API could not read this input." };
+    }
+    return (await probeApi()) ? { error: `The API returned an error (HTTP ${res.status}).` } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function analyseNote(loanId: string, text: string, useFinbert = false) {
+  return postJson<NoteAnalysis>("/api/unstructured/note", { loan_id: loanId, text, use_finbert: useFinbert });
+}
+
+export function analyseStatement(loanId: string, statement: unknown) {
+  return postJson<StatementAnalysis>("/api/unstructured/statement", { loan_id: loanId, statement });
+}
+
+export async function fetchSampleStatement(kind: "healthy" | "stressed"): Promise<Record<string, unknown> | null> {
+  try {
+    const res = await fetchWithTimeout(`/api/unstructured/sample-statement?kind=${kind}`);
+    return res.ok ? ((await res.json()) as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Action plan: the recourse levers for one account, borrower vs bank, and the
+// PD after applying a chosen set. Analysis only. Null when no API.
+// ---------------------------------------------------------------------------
+
+export interface PlanLever {
+  label: string;
+  actor: "borrower" | "bank";
+  plain: string;
+}
+
+export interface PlanVerdict {
+  pd_12m: number;
+  risk_grade: string;
+  rag: string;
+}
+
+export interface ActionPlan {
+  loan_id: string;
+  segment: string;
+  target_pd: number;
+  current: PlanVerdict | null;
+  levers: PlanLever[];
+  suggested: {
+    baseline_pd: number;
+    achieved_pd: number;
+    borrower_pd: number;
+    target_met: boolean;
+    borrower_target_met: boolean;
+    changes: { change: string; actor: "borrower" | "bank"; plain: string; pd_after: number }[];
+  } | null;
+}
+
+export async function fetchActionPlan(loanId: string): Promise<ActionPlan | null> {
+  try {
+    const res = await fetchWithTimeout(`/api/action-plan/${encodeURIComponent(loanId)}`, undefined, 20000);
+    return res.ok ? ((await res.json()) as ActionPlan) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function applyActions(
+  loanId: string,
+  actions: string[],
+): Promise<{ before: PlanVerdict; after: PlanVerdict } | null> {
+  try {
+    const res = await fetchWithTimeout(
+      `/api/action-plan/${encodeURIComponent(loanId)}/apply`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ actions }) },
+      20000,
+    );
+    return res.ok ? await res.json() : null;
+  } catch {
+    return null;
+  }
+}

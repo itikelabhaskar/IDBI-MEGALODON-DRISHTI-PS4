@@ -18,7 +18,7 @@
  *   back as `"fallback"` precisely so the UI can say so.
  * - Everything downstream of the PD is exact. Grade edges, RAG buckets, the SMA
  *   playbook, the Ind AS 109 staging and the ECL formula are transcribed from
- *   `src/framework/interpretation.py`, and the early-warning rules from
+ *   `src/framework/interpretation.py` (DPD regulatory floor included), and the early-warning rules from
  *   `src/explain/ews_rules.py`, thresholds included. The interpretation a credit
  *   officer sees is therefore the production one; only the probability feeding it
  *   is approximate.
@@ -68,14 +68,14 @@ interface Action {
 }
 
 const PLAYBOOK: Record<string, Action> = {
-  RG1: { sma_watch: "Standard", action: "Business as usual; eligible for cross-sell / limit increase", cadence: "Annual review", owner: "Relationship manager" },
-  RG2: { sma_watch: "Standard", action: "Business as usual; monitor at portfolio level", cadence: "Annual review", owner: "Relationship manager" },
-  RG3: { sma_watch: "Standard", action: "Standard monitoring; no action", cadence: "Semi-annual review", owner: "Relationship manager" },
-  RG4: { sma_watch: "Standard", action: "Watch trend; verify latest financials", cadence: "Quarterly review", owner: "Credit analyst" },
-  RG5: { sma_watch: "SMA-0 watch", action: "Proactive engagement; confirm cash-flow health", cadence: "Monthly review", owner: "Credit analyst" },
-  RG6: { sma_watch: "SMA-0 watch", action: "Enhanced monitoring; request updated stock/GST statements", cadence: "Monthly review", owner: "Credit analyst" },
-  RG7: { sma_watch: "SMA-1 watch", action: "Restructuring assessment; covenant / collateral review", cadence: "Fortnightly review", owner: "Watchlist committee" },
-  RG8: { sma_watch: "SMA-2 watch", action: "Site visit + restructuring offer; tighten limits", cadence: "Fortnightly review", owner: "Watchlist committee" },
+  RG1: { sma_watch: "No watch", action: "Business as usual; eligible for cross-sell / limit increase", cadence: "Annual review", owner: "Relationship manager" },
+  RG2: { sma_watch: "No watch", action: "Business as usual; monitor at portfolio level", cadence: "Annual review", owner: "Relationship manager" },
+  RG3: { sma_watch: "No watch", action: "Standard monitoring; no action", cadence: "Semi-annual review", owner: "Relationship manager" },
+  RG4: { sma_watch: "No watch", action: "Watch trend; verify latest financials", cadence: "Quarterly review", owner: "Credit analyst" },
+  RG5: { sma_watch: "Early watch 1", action: "Proactive engagement; confirm cash-flow health", cadence: "Monthly review", owner: "Credit analyst" },
+  RG6: { sma_watch: "Early watch 1", action: "Enhanced monitoring; request updated stock/GST statements", cadence: "Monthly review", owner: "Credit analyst" },
+  RG7: { sma_watch: "Early watch 2", action: "Restructuring assessment; covenant / collateral review", cadence: "Fortnightly review", owner: "Watchlist committee" },
+  RG8: { sma_watch: "Early watch 3", action: "Site visit + restructuring offer; tighten limits", cadence: "Fortnightly review", owner: "Watchlist committee" },
   RG9: { sma_watch: "High-slippage risk", action: "Escalate to recovery; provision proactively; RFA review", cadence: "Weekly review", owner: "Recovery / stressed-assets" },
   RG10: { sma_watch: "High-slippage risk", action: "Initiate collections / recovery; maximise provisioning", cadence: "Weekly review", owner: "Recovery / stressed-assets" },
 };
@@ -96,9 +96,11 @@ export function assignEclStage(grade: string): number {
 }
 
 /** Ind AS 109 three-stage ECL, including the RBI floors on stage 3. */
-export function indAs109Ecl(pd: number, ead: number, grade: string, lgd = DEFAULT_LGD) {
-  const stage = assignEclStage(grade);
+export function indAs109Ecl(pd: number, ead: number, grade: string, lgd = DEFAULT_LGD, stageFloor?: number) {
+  const stage = Math.max(assignEclStage(grade), stageFloor ?? 1);
   const ecl12m = pd * lgd * ead;
+  // Lifetime PD proxy: flat 2.5x the 12m PD, capped at 1 (mirrors interpretation.py). A judgemental
+  // haircut, not a fitted term structure: a 3-year constant hazard would give about 3p.
   const lifetimeEcl = Math.min(1.0, 2.5 * pd) * lgd * ead;
   let ecl: number;
   if (stage === 1) {
@@ -112,6 +114,22 @@ export function indAs109Ecl(pd: number, ead: number, grade: string, lgd = DEFAUL
   return { ecl, ecl_stage: stage, lifetime_ecl: lifetimeEcl, ecl_12m: ecl12m };
 }
 
+/**
+ * RBI SMA bucket and Ind AS 109 stage floor for days past due. Mirrors
+ * `dpd_regulatory_floor` in interpretation.py: DPD never moves the PD, but an
+ * overdue account is never classed more leniently than its overdue status.
+ */
+export function dpdRegulatoryFloor(dpd: unknown) {
+  const d = typeof dpd === "number" ? dpd : Number(dpd);
+  if (!Number.isFinite(d) || d <= 0) return null;
+  if (d > 90) return { bucket: "NPA", sma_watch: "NPA (>90 DPD)", floor_grade: "RG9", stage_floor: 3 };
+  if (d > 60) return { bucket: "SMA-2", sma_watch: "Early watch 3", floor_grade: "RG8", stage_floor: 2 };
+  if (d > 30) return { bucket: "SMA-1", sma_watch: "Early watch 2", floor_grade: "RG7", stage_floor: 2 };
+  return { bucket: "SMA-0", sma_watch: "Early watch 1", floor_grade: "RG5", stage_floor: 1 };
+}
+
+const gradeRank = (g: string) => Number(g.replace(/^RG/i, ""));
+
 // Sector risk multipliers, shared with the scenario-stress fallback.
 const SECTOR_BETAS: Record<string, number> = {
   construction: 1.4, hospitality: 1.4, auto_components: 1.3, auto_ancillary: 1.3,
@@ -124,8 +142,8 @@ const num = (v: unknown, dflt = 0): number =>
 
 /**
  * Additive log-odds terms. Every weight is signed so the direction matches the
- * monotone constraints the trained model is fitted under — more bounces, more
- * DPD, a bigger drawing-power gap or a worse bureau score can only raise PD.
+ * monotone constraints the trained model is fitted under — more bounces, a
+ * bigger drawing-power gap or a worse bureau score can only raise PD.
  * Each term doubles as a reason code, so the explanation shown to the officer is
  * the actual arithmetic rather than a separate narrative.
  */
@@ -147,10 +165,9 @@ function logOddsTerms(p: OfflineScoreInput): Term[] {
   add("cibil_score", "FINANCIAL_HEALTH", "Credit bureau score & financial health",
     ((720 - Math.max(300, Math.min(900, cibil))) / 100) * 0.9);
 
-  // Days past due: the single strongest behavioural signal.
-  const dpd = Math.max(0, num(p.dpd));
-  add("dpd", "REPAYMENT_BEHAVIOUR", "Repayment behaviour (EMI / utilisation)",
-    Math.min(2.4, Math.sqrt(dpd) * 0.42));
+  // No DPD term: the trained model excludes DPD to avoid circular leakage, so
+  // the approximation does too. DPD acts on classification only, through
+  // dpdRegulatoryFloor.
 
   const bounces = Math.max(0, num(p.emi_bounce_6m));
   add("emi_bounce_6m", "REPAYMENT_BEHAVIOUR", "Repayment behaviour (EMI / utilisation)",
@@ -230,15 +247,52 @@ const BASE_LOG_ODDS = -4.0;
  * `/score/{segment}` endpoint returns, with `status: "fallback"` so the caller
  * can label the verdict as an offline approximation.
  */
-export function offlineScore(segment: string, p: OfflineScoreInput) {
+// Same fill-ins as engineer_idbi_features (src/ingestion/idbi_adapter.py) when a
+// form or extract does not carry the behavioural fields, so the offline estimate
+// and the live model read one input the same way.
+function withDerivedFields(p: OfflineScoreInput): OfflineScoreInput {
+  const sanction = Math.max(1, num(p.sanction_limit, num(p.ticket_size, 1)));
+  const gap = p.drawing_power_gap_pct != null
+    ? Math.max(0, num(p.drawing_power_gap_pct))
+    : Math.max(0, ((sanction - num(p.drawing_power, sanction)) / sanction) * 100);
+  const ratio = num(p.demanded_vs_collected_ratio, 1.0);
+  return {
+    ...p,
+    cashflow_volatility: p.cashflow_volatility ?? Math.min(0.9, Math.max(0.1, gap / 50)),
+    balance_trend_pct: p.balance_trend_pct ?? Math.min(20, Math.max(-50, (ratio - 1) * 100)),
+  };
+}
+
+export function offlineScore(segment: string, input: OfflineScoreInput) {
+  const p = withDerivedFields(input);
   const terms = logOddsTerms(p);
   const z = BASE_LOG_ODDS + terms.reduce((s, t) => s + t.contribution, 0);
   const pd = Math.min(0.97, Math.max(0.002, 1 / (1 + Math.exp(-z))));
 
   const grade = assignGrade(pd);
-  const play = PLAYBOOK[grade];
+  let play = PLAYBOOK[grade];
+  let rag = RAG_BY_GRADE[grade];
+
+  const floor = dpdRegulatoryFloor(p.dpd);
+  const applied = floor != null && gradeRank(floor.floor_grade) > gradeRank(grade);
+  if (floor && applied) {
+    play = { ...PLAYBOOK[floor.floor_grade], sma_watch: floor.sma_watch };
+    rag = RAG_BY_GRADE[floor.floor_grade];
+  }
+  const regulatory_overlay = floor
+    ? {
+        rule: "dpd_regulatory_floor",
+        dpd: num(p.dpd),
+        bucket: floor.bucket,
+        stage_floor: floor.stage_floor,
+        model_grade: grade,
+        model_sma_watch: PLAYBOOK[grade].sma_watch,
+        applied,
+      }
+    : null;
+
   const ead = Math.max(0, num(p.sanction_limit, num(p.ticket_size, 0)));
-  const ecl = indAs109Ecl(pd, ead, grade);
+  const ecl = indAs109Ecl(pd, ead, grade, DEFAULT_LGD, floor?.stage_floor);
 
   // Largest absolute movers first — the same ordering the SHAP panel uses.
   const reason_codes = terms
@@ -259,8 +313,8 @@ export function offlineScore(segment: string, p: OfflineScoreInput) {
     provisional: true,
     pd_12m: Math.round(pd * 1e4) / 1e4,
     risk_grade: grade,
-    rag: RAG_BY_GRADE[grade],
-    risk_band: RAG_BY_GRADE[grade] === "Green" ? "low" : RAG_BY_GRADE[grade] === "Amber" ? "elevated" : "high",
+    rag,
+    risk_band: rag === "Green" ? "low" : rag === "Amber" ? "elevated" : "high",
     sma_watch: play.sma_watch,
     recommended_action: play.action,
     review_cadence: play.cadence,
@@ -277,5 +331,6 @@ export function offlineScore(segment: string, p: OfflineScoreInput) {
     },
     reason_codes,
     ews: ewsSignals(p),
+    regulatory_overlay,
   };
 }

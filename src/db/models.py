@@ -34,8 +34,10 @@ class Decision(Base):
     proposed_action = Column(String(256), nullable=True)
     proposed_sma = Column(String(32), nullable=True)
     pd = Column(Float, nullable=True)
-    risk_grade = Column(String(16), nullable=True)
-    decision = Column(String(16), nullable=False)  # accept | override | defer
+    risk_grade = Column(String(16), nullable=True)  # model grade at the time of the decision
+    revised_grade = Column(String(16), nullable=True)  # committee grade on an override
+    role = Column(String(128), nullable=True)
+    decision = Column(String(16), nullable=False)  # accept | override | defer | reject | restructure
     override_action = Column(String(256), nullable=True)
     reason = Column(Text, nullable=True, default="")
     officer = Column(String(64), nullable=False, default="demo_officer")
@@ -50,10 +52,14 @@ class Decision(Base):
             "proposed_sma": self.proposed_sma,
             "pd": self.pd,
             "risk_grade": self.risk_grade,
+            "original_grade": self.risk_grade,
+            "revised_grade": self.revised_grade,
             "decision": self.decision,
             "override_action": self.override_action,
             "reason": self.reason,
+            "rationale": self.reason,
             "officer": self.officer,
+            "role": self.role,
             "ts": self.ts,
         }
 
@@ -153,6 +159,12 @@ class LoanAccount(Base):
     recommended_action = Column(String(256), nullable=True)
     review_cadence = Column(String(64), nullable=True)
     action_owner = Column(String(64), nullable=True)
+    reviewed_status = Column(String(32), default="PENDING", nullable=False)
+    # Grade set by a committee override; the model's own grade stays in risk_grade.
+    committee_grade = Column(String(16), nullable=True)
+    reviewed_by = Column(String(64), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    officer_notes = Column(Text, nullable=True)
     raw_features_json = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utc_now)
     updated_at = Column(
@@ -218,6 +230,11 @@ class LoanAccount(Base):
             "restructuring_flag": self.restructuring_flag,
             "gst_filing_delay_days": self.gst_filing_delay_days,
             "itc_mismatch_flag": self.itc_mismatch_flag,
+            "reviewed_status": self.reviewed_status or "PENDING",
+            "committee_grade": self.committee_grade,
+            "reviewed_by": self.reviewed_by,
+            "reviewed_at": self.reviewed_at.isoformat() if self.reviewed_at else None,
+            "officer_notes": self.officer_notes,
             "raw": raw_inputs,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,

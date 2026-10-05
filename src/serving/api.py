@@ -11,9 +11,10 @@ import os
 from pathlib import Path
 from datetime import datetime, timezone
 import csv
+import hmac
 import io
 import json
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 # LightGBM + any torch-adjacent libs: keep OpenMP tame in a server context.
@@ -35,9 +36,14 @@ from src.db.session import (  # noqa: E402
     log_watchlist_run,
     simulate_contagion_portfolio,
     simulate_scenario_portfolio,
+    update_loan_review_status,
     upsert_loan,
 )
 from src.explain.credit_memo import generate_memo  # noqa: E402
+from src.features.notes_signals import sanitize_pii  # noqa: E402
+from src.features.org_hierarchy import BRANCH_REGISTRY, branch_for  # noqa: E402
+from src.serving.unstructured import analyse_note, analyse_statement, sample_statement  # noqa: E402
+from src.serving.action_plan import action_plan, apply_actions  # noqa: E402
 from src.serving.scorer import DEFAULT_SEGMENT, RiskScorer  # noqa: E402
 from src.serving.segments import SEGMENT_SPECS, available_segments  # noqa: E402
 
@@ -53,7 +59,7 @@ except Exception:
 
 def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
     expected = os.environ.get("DRISHTI_API_KEY")
-    if expected and x_api_key != expected:
+    if expected and not hmac.compare_digest(x_api_key or "", expected):
         raise HTTPException(status_code=401, detail="Missing or invalid X-API-Key header")
 
 
@@ -173,10 +179,45 @@ class IDBIBorrower(BaseModel):
         return self
 
 
+# Every committee decision also sets the loan's review status, so the portfolio
+# row, the borrower page and the audit trail never disagree. Defer is its own
+# state (it is not a review sign-off).
+_REVIEW_STATUS_BY_DECISION = {
+    "accept": "REVIEWED",
+    "override": "REVIEWED",
+    "defer": "DEFERRED",
+    "reject": "FLAGGED_SARB",
+    "restructure": "RESTRUCTURE",
+}
+
+
+def _sync_review_status(
+    loan_id: str, decision: str, officer: str, note: str | None, revised_grade: str | None = None
+) -> None:
+    dec = str(decision).strip().lower()
+    status = _REVIEW_STATUS_BY_DECISION.get(dec)
+    if status is None:
+        return
+    try:
+        update_loan_review_status(
+            loan_id,
+            status,
+            reviewed_by=officer,
+            notes=sanitize_pii(note) if note else None,
+            committee_grade=revised_grade if dec == "override" else None,
+        )
+    except KeyError:
+        pass  # decision on an account that is not in the loan master (e.g. a proposal)
+
+
+# CSV columns read as text so codes such as "0019" keep their leading zeros.
+_ID_COLUMNS = {"loan_id", "account_number", "acct_num", "cif_id", "customer_id", "branch_code", "branch", "zone", "region"}
+
+
 class DecisionCreate(BaseModel):
 
-    loan_id: str
-    decision: str = Field(..., description="accept | override | defer | reject")
+    loan_id: str = Field(..., min_length=1, max_length=64)
+    decision: Literal["accept", "override", "defer", "reject", "restructure"]
     segment: str = Field(default="msme_idbi")
     proposed_action: str | None = None
     proposed_sma: str | None = None
@@ -184,12 +225,12 @@ class DecisionCreate(BaseModel):
     risk_grade: str | None = None
     original_grade: str | None = None
     revised_grade: str | None = None
-    override_action: str | None = None
-    rationale: str | None = None
-    reason: str | None = None
-    decided_by: str | None = None
-    officer: str | None = None
-    role: str | None = "Credit Committee Officer"
+    override_action: str | None = Field(default=None, max_length=256)
+    rationale: str | None = Field(default=None, max_length=2000)
+    reason: str | None = Field(default=None, max_length=2000)
+    decided_by: str | None = Field(default=None, max_length=128)
+    officer: str | None = Field(default=None, max_length=128)
+    role: str | None = Field(default="Credit Committee Officer", max_length=128)
 
 
 class DecisionResponse(BaseModel):
@@ -242,6 +283,20 @@ def score(borrower: Borrower, explain: bool = True, memo: bool = False) -> dict:
     return _maybe_memo(result, borrower.loan_id or "the borrower", memo)
 
 
+# Literal paths before /score/{segment}, which would otherwise capture "batch".
+@app.post("/score/batch", dependencies=[Depends(require_api_key)])
+@app.post("/api/score/batch", dependencies=[Depends(require_api_key)])
+def score_batch(borrowers: list[Borrower], explain: bool = False) -> list[dict]:
+    """Score many borrowers on the default segment.
+
+    Unlike ``/score`` (HTTP 422), records with insufficient coverage are
+    returned inline as ``status=insufficient_data`` payloads so one thin
+    record never fails the whole batch; callers filter on ``status``.
+    """
+    s = get_scorer(DEFAULT_SEGMENT)
+    return [s.score_record(b.model_dump(exclude_none=True), explain=explain) for b in borrowers]
+
+
 @app.post("/score/{segment}", dependencies=[Depends(require_api_key)])
 @app.post("/api/score/{segment}", dependencies=[Depends(require_api_key)])
 def score_segment(
@@ -259,13 +314,6 @@ def score_segment(
     return _maybe_memo(result, str(record.get("loan_id", "the borrower")), memo)
 
 
-@app.post("/score/batch", dependencies=[Depends(require_api_key)])
-@app.post("/api/score/batch", dependencies=[Depends(require_api_key)])
-def score_batch(borrowers: list[Borrower], explain: bool = False) -> list[dict]:
-    s = get_scorer(DEFAULT_SEGMENT)
-    return [s.score_record(b.model_dump(exclude_none=True), explain=explain) for b in borrowers]
-
-
 @app.post("/score/msme_idbi", dependencies=[Depends(require_api_key)])
 @app.post("/api/score/msme_idbi", dependencies=[Depends(require_api_key)])
 def score_msme_idbi(
@@ -281,7 +329,11 @@ def score_msme_idbi(
 @app.post("/decisions", response_model=DecisionResponse)
 @app.post("/api/decisions", response_model=DecisionResponse)
 def create_decision(payload: DecisionCreate) -> DecisionResponse:
-    reason_text = payload.rationale or payload.reason or ""
+    if get_db_borrower(payload.loan_id) is None:
+        raise HTTPException(status_code=404, detail=f"Loan account {payload.loan_id} not found")
+    # The rationale is free text typed by an officer; mask identifiers before it
+    # enters the audit trail, which every governance viewer can read.
+    reason_text = sanitize_pii(payload.rationale or payload.reason or "")
     officer_name = payload.decided_by or payload.officer or "demo_officer"
     ovr_action = payload.override_action or (
         f"Override to {payload.revised_grade}" if payload.revised_grade else None
@@ -300,6 +352,11 @@ def create_decision(payload: DecisionCreate) -> DecisionResponse:
             override_action=ovr_action,
             reason=reason_text,
             officer=officer_name,
+            revised_grade=payload.revised_grade if payload.decision == "override" else None,
+            role=payload.role,
+        )
+        _sync_review_status(
+            payload.loan_id, payload.decision, officer_name, reason_text, payload.revised_grade
         )
         return DecisionResponse(
             id=rec_id,
@@ -320,7 +377,7 @@ def create_decision(payload: DecisionCreate) -> DecisionResponse:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(
-            status_code=500, detail=f"Database persistence error: {exc}"
+            status_code=500, detail="Could not record the decision"
         ) from exc
 
 
@@ -375,11 +432,25 @@ def _format_ews(result: dict) -> list[dict]:
     ]
 
 
+def _resolve_branch(req: "UnderwriteSubmitRequest", existing: dict[str, Any] | None) -> dict[str, str]:
+    """Branch / region / zone for an appraisal, from the bank's branch registry.
+
+    A re-rating keeps the account's own branch. A new proposal uses the branch
+    the officer picked, else the in-state branch the org overlay would assign.
+    """
+    if existing is not None:
+        return {k: existing.get(k) for k in ("branch_code", "branch_name", "zone", "region")}
+    by_code = {b["branch_code"]: b for b in BRANCH_REGISTRY}
+    b = by_code.get(str(req.branch_code)) if req.branch_code else None
+    b = b or branch_for(req.loan_id, req.state)
+    return {k: b[k] for k in ("branch_code", "branch_name", "zone", "region")}
+
+
 class UnderwriteSubmitRequest(BaseModel):
     loan_id: str
     segment: str = Field(default="msme_idbi")
-    sanction_limit: float = Field(..., description="Sanction limit in INR")
-    drawing_power: float = Field(..., description="Drawing power in INR")
+    sanction_limit: float = Field(..., gt=0, description="Sanction limit in INR")
+    drawing_power: float = Field(..., ge=0, description="Drawing power in INR")
     cibil_score: float = Field(default=700.0)
     demanded_vs_collected_ratio: float = Field(default=1.0)
     dpd: float = Field(default=0.0)
@@ -388,18 +459,21 @@ class UnderwriteSubmitRequest(BaseModel):
     restructuring_flag: int = Field(default=0)
     gst_filing_delay_days: float = Field(default=0.0)
     itc_mismatch_flag: int = Field(default=0)
-    sector: str = Field(default="auto_ancillary")
+    sector: str = Field(default="auto_components")
     sub_segment: str = Field(default="small")
     state: str = Field(default="MH")
-    branch_code: str = Field(default="1019")
+    # "new" = a fresh proposal, refused if the ID is already in the book;
+    # "rerate" = re-appraisal of an account fetched from the book.
+    mode: Literal["new", "rerate"] = "new"
+    branch_code: str | None = None
     branch_name: str | None = None
     zone: str | None = None
     region: str | None = None
-    decision: str = Field(default="accept")  # accept | override | defer | reject
+    decision: Literal["accept", "override", "defer", "reject", "restructure"] = "accept"
     revised_grade: str | None = None
     override_action: str | None = None
-    rationale: str | None = None
-    officer: str = Field(default="Credit Appraisal Officer")
+    rationale: str | None = Field(default=None, max_length=2000)
+    officer: str = Field(default="Credit Appraisal Officer", max_length=128)
     role: str = Field(default="Branch Credit Appraisal Officer")
 
 
@@ -470,6 +544,73 @@ def get_borrower_detail(loan_id: str) -> dict[str, Any]:
     return borrower
 
 
+class NoteAnalyseRequest(BaseModel):
+    loan_id: str = Field(..., min_length=1, max_length=64)
+    text: str = Field(..., min_length=1, max_length=4000)
+    use_finbert: bool = False
+
+
+class StatementAnalyseRequest(BaseModel):
+    loan_id: str = Field(..., min_length=1, max_length=64)
+    statement: dict[str, Any] | list[Any]
+
+
+def _account_for_analysis(loan_id: str) -> tuple[RiskScorer, dict[str, Any]]:
+    loan = get_db_borrower(loan_id)
+    if loan is None:
+        raise HTTPException(status_code=404, detail=f"Loan account {loan_id} not found")
+    raw = dict(loan.get("raw") or {})
+    if not raw:
+        raise HTTPException(status_code=422, detail=f"Loan account {loan_id} has no stored inputs to re-score")
+    return get_scorer(loan.get("segment") or "msme_idbi"), raw
+
+
+@app.post("/unstructured/note")
+@app.post("/api/unstructured/note")
+def unstructured_note(req: NoteAnalyseRequest) -> dict[str, Any]:
+    """Mask and read an officer note, then re-score the account with it. Not saved."""
+    scorer, raw = _account_for_analysis(req.loan_id)
+    return {"loan_id": req.loan_id, "segment": scorer.segment, **analyse_note(scorer, raw, req.text, req.use_finbert)}
+
+
+@app.post("/unstructured/statement")
+@app.post("/api/unstructured/statement")
+def unstructured_statement(req: StatementAnalyseRequest) -> dict[str, Any]:
+    """Parse an AA / Finacle 393 statement, then re-score the account with it. Not saved."""
+    scorer, raw = _account_for_analysis(req.loan_id)
+    return {"loan_id": req.loan_id, "segment": scorer.segment, **analyse_statement(scorer, raw, req.statement)}
+
+
+@app.get("/unstructured/sample-statement")
+@app.get("/api/unstructured/sample-statement")
+def unstructured_sample_statement(kind: Literal["healthy", "stressed"] = "stressed") -> dict[str, Any]:
+    """Generated 90-day statement in Sahamati AA FI-JSON shape (synthetic, for the demo)."""
+    return sample_statement(kind)
+
+
+class ApplyActionsRequest(BaseModel):
+    actions: list[str] = Field(default_factory=list, max_length=10)
+
+
+@app.get("/action-plan/{loan_id}")
+@app.get("/api/action-plan/{loan_id}")
+def get_action_plan(loan_id: str) -> dict[str, Any]:
+    """Recourse levers for an account (borrower vs bank) and the engine's suggested route."""
+    scorer, raw = _account_for_analysis(loan_id)
+    return {"loan_id": loan_id, **action_plan(scorer, raw)}
+
+
+@app.post("/action-plan/{loan_id}/apply")
+@app.post("/api/action-plan/{loan_id}/apply")
+def post_apply_actions(loan_id: str, req: ApplyActionsRequest) -> dict[str, Any]:
+    """PD after applying the chosen levers to the account's stored inputs. Not saved."""
+    scorer, raw = _account_for_analysis(loan_id)
+    try:
+        return {"loan_id": loan_id, **apply_actions(scorer, raw, req.actions)}
+    except KeyError as exc:
+        raise HTTPException(status_code=422, detail=f"Unknown action for this segment: {exc}") from exc
+
+
 @app.post("/underwrite/submit")
 @app.post("/api/underwrite/submit")
 def submit_underwriting(req: UnderwriteSubmitRequest) -> dict[str, Any]:
@@ -495,9 +636,20 @@ def submit_underwriting(req: UnderwriteSubmitRequest) -> dict[str, Any]:
         "sector": req.sector,
         "sub_segment": req.sub_segment,
         "state": req.state,
-        "cashflow_volatility": min(0.8, 0.15 + (dp_gap / 100.0) * 0.5),
-        "balance_trend_pct": (req.demanded_vs_collected_ratio - 1.0) * 100.0,
     }
+    # cashflow_volatility / balance_trend_pct are left for the segment's feature
+    # engineer to derive, exactly as in training; a second formula here gave the
+    # same borrower a different PD on this screen than on the borrower page.
+
+    existing = get_db_borrower(req.loan_id)
+    if req.mode == "new" and existing is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Loan account {req.loan_id} is already in the book; fetch it to re-rate it.",
+        )
+    if req.mode == "rerate" and existing is None:
+        raise HTTPException(status_code=404, detail=f"Loan account {req.loan_id} not found")
+    org = _resolve_branch(req, existing)
 
     scorer = get_scorer(req.segment)
     score_res = scorer.score_record(score_payload, explain=True)
@@ -523,10 +675,7 @@ def submit_underwriting(req: UnderwriteSubmitRequest) -> dict[str, Any]:
     loan_record = {
         "loan_id": req.loan_id,
         "segment": req.segment,
-        "branch_code": req.branch_code,
-        "branch_name": req.branch_name or f"Branch {req.branch_code}",
-        "zone": req.zone or "West",
-        "region": req.region or "Mumbai",
+        **org,
         "sector": req.sector,
         "sub_segment": req.sub_segment,
         "state": req.state,
@@ -536,7 +685,7 @@ def submit_underwriting(req: UnderwriteSubmitRequest) -> dict[str, Any]:
         "demanded_vs_collected_ratio": req.demanded_vs_collected_ratio,
         "cibil_score": req.cibil_score,
         "dpd": req.dpd,
-        "overdue_amt": 0.0,
+        "overdue_amt": float((existing or {}).get("overdue_amt") or 0.0),
         "emi_bounce_6m": req.emi_bounce_6m,
         "lien_flag": req.lien_flag,
         "restructuring_flag": req.restructuring_flag,
@@ -566,11 +715,27 @@ def submit_underwriting(req: UnderwriteSubmitRequest) -> dict[str, Any]:
         }),
     }
 
+    status = _REVIEW_STATUS_BY_DECISION.get(req.decision)
+    if status:
+        loan_record["reviewed_status"] = status
+        loan_record["reviewed_by"] = req.officer
+        loan_record["reviewed_at"] = datetime.now(timezone.utc)
+    loan_record["committee_grade"] = (
+        req.revised_grade if req.decision == "override" and req.revised_grade else None
+    )
+
     saved_loan = upsert_loan(loan_record)
 
-    revised = req.revised_grade if req.decision == "override" and req.revised_grade else None
-    ovr_action = req.override_action or (f"Override to {revised}" if revised else None)
-    rationale = req.rationale or f"Appraisal decision {req.decision} logged by {req.officer}"
+    if req.decision == "override":
+        revised = req.revised_grade if req.revised_grade else None
+        ovr_action = req.override_action or (f"Override to {revised}" if revised else None)
+    elif req.decision == "restructure":
+        revised = None
+        ovr_action = req.override_action or "Evaluate MSME Restructuring (TEV Study)"
+    else:
+        revised = None
+        ovr_action = req.override_action
+    rationale = sanitize_pii(req.rationale or "") or f"Appraisal decision {req.decision} logged by {req.officer}"
 
     dec_id = log_decision(
         loan_id=req.loan_id,
@@ -578,11 +743,13 @@ def submit_underwriting(req: UnderwriteSubmitRequest) -> dict[str, Any]:
         proposed_action=recommended_action,
         proposed_sma=sma_watch,
         pd=pd_12m,
-        risk_grade=revised if revised else risk_grade,
+        risk_grade=risk_grade,
         decision=req.decision,
         override_action=ovr_action,
         reason=rationale,
         officer=req.officer,
+        revised_grade=revised,
+        role=req.role,
     )
 
     return {
@@ -605,10 +772,19 @@ def submit_underwriting(req: UnderwriteSubmitRequest) -> dict[str, Any]:
     }
 
 
+# Upper bounds for one batch request; a larger extract is split by the caller.
+MAX_BATCH_ROWS = 5_000
+MAX_BATCH_BYTES = 10_000_000
+
+
 @app.post("/batch/upload")
 @app.post("/api/batch/upload")
 async def batch_upload(request: Request) -> dict[str, Any]:
     records: list[dict[str, Any]] = []
+    rerate = False
+    # persist=False screens the extract without touching the loan master or the
+    # run log, and skips per-row reason codes (about 6x faster for large extracts).
+    persist = True
     segment = "msme_idbi"
 
     content_type = request.headers.get("content-type", "")
@@ -616,7 +792,12 @@ async def batch_upload(request: Request) -> dict[str, Any]:
         form = await request.form()
         file_obj = form.get("file")
         if file_obj and hasattr(file_obj, "read"):
-            raw_bytes = await file_obj.read()
+            raw_bytes = await file_obj.read(MAX_BATCH_BYTES + 1)
+            if len(raw_bytes) > MAX_BATCH_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Batch file is over {MAX_BATCH_BYTES // 1_000_000} MB; split the extract.",
+                )
             content = raw_bytes.decode("utf-8", errors="replace")
             reader = csv.DictReader(io.StringIO(content))
             for row in reader:
@@ -626,18 +807,26 @@ async def batch_upload(request: Request) -> dict[str, Any]:
                         continue
                     k_clean = k.strip()
                     v_clean = v.strip()
+                    # Identifiers keep their leading zeros (CIF / account / branch codes).
+                    if k_clean.lower() in _ID_COLUMNS:
+                        cleaned[k_clean] = v_clean
+                        continue
                     try:
                         cleaned[k_clean] = float(v_clean) if "." in v_clean else int(v_clean)
                     except ValueError:
                         cleaned[k_clean] = v_clean
                 records.append(cleaned)
         segment = str(form.get("segment") or "msme_idbi")
+        rerate = str(form.get("rerate") or "").lower() in {"1", "true", "yes"}
+        persist = str(form.get("persist") or "true").lower() not in {"0", "false", "no"}
     else:
         try:
             body = await request.json()
             if isinstance(body, dict):
                 records = body.get("records", [])
                 segment = body.get("segment", "msme_idbi")
+                rerate = bool(body.get("rerate", False))
+                persist = bool(body.get("persist", True))
             elif isinstance(body, list):
                 records = body
         except Exception as exc:
@@ -647,9 +836,18 @@ async def batch_upload(request: Request) -> dict[str, Any]:
 
     if not records:
         raise HTTPException(status_code=400, detail="No records found in batch upload")
+    if len(records) > MAX_BATCH_ROWS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Batch has {len(records):,} rows; the limit is {MAX_BATCH_ROWS:,}. Split the extract.",
+        )
 
     scorer = get_scorer(segment)
     scored_records: list[dict[str, Any]] = []
+    refused: list[dict[str, str]] = []
+    # An extract that repeats an account already in the book would silently
+    # replace its scores, segment and branch. Score it, report it, do not save it
+    # unless the caller asks for a re-rate.
 
     for i, rec in enumerate(records):
         loan_id = str(rec.get("loan_id", f"BATCH_{uuid4().hex[:6].upper()}"))
@@ -670,20 +868,28 @@ async def batch_upload(request: Request) -> dict[str, Any]:
             "demanded_vs_collected_ratio": float(rec.get("demanded_vs_collected_ratio", 1.0)),
             "cibil_score": float(rec.get("cibil_score", 700.0)),
             "dpd": float(rec.get("dpd", 0.0)),
-            "emi_bounce_6m": int(rec.get("emi_bounce_6m", 0)),
             "lien_flag": int(rec.get("lien_flag", 0)),
             "restructuring_flag": int(rec.get("restructuring_flag", 0)),
             "gst_filing_delay_days": float(rec.get("gst_filing_delay_days", 0.0)),
             "itc_mismatch_flag": int(rec.get("itc_mismatch_flag", 0)),
-            "sector": str(rec.get("sector", "auto_ancillary")),
+            "sector": str(rec.get("sector", "auto_components")),
             "sub_segment": str(rec.get("sub_segment", "small")),
             "state": str(rec.get("state", "MH")),
-            "cashflow_volatility": min(0.8, 0.15 + (dp_gap / 100.0) * 0.5),
-            "balance_trend_pct": (float(rec.get("demanded_vs_collected_ratio", 1.0)) - 1.0) * 100.0,
         }
+        if rec.get("emi_bounce_6m") not in (None, ""):
+            scoring_input["emi_bounce_6m"] = int(float(rec["emi_bounce_6m"]))
+        # Optional behavioural fields pass through only when the extract has them;
+        # otherwise the feature engineer derives them as it did in training.
+        for opt in ("cashflow_volatility", "balance_trend_pct"):
+            if rec.get(opt) not in (None, ""):
+                scoring_input[opt] = float(rec[opt])
 
-        res = scorer.score_record(scoring_input, explain=True)
-        pd_val = float(res.get("pd_12m", 0.05))
+        res = scorer.score_record(scoring_input, explain=persist)
+        if res.get("pd_12m") is None:
+            # Refused for thin data: report it, never score or save it with a guess.
+            refused.append({"loan_id": loan_id, "reason": str(res.get("message") or res.get("status") or "not scored")})
+            continue
+        pd_val = float(res["pd_12m"])
         grade = str(res.get("risk_grade", "RG5"))
         rag = str(res.get("rag", "Amber"))
         sma = str(res.get("sma_watch", "Standard"))
@@ -696,10 +902,12 @@ async def batch_upload(request: Request) -> dict[str, Any]:
         reason_codes = _format_reason_codes(res)
         ews_triggers = _format_ews(res)
 
-        branch_code = str(rec.get("branch_code", "1019"))
-        branch_name = str(rec.get("branch_name", "Bengaluru — Peenya"))
-        zone = str(rec.get("zone", "South"))
-        region = str(rec.get("region", "Bengaluru"))
+        # Branch from the extract when it names a known branch, else the in-state
+        # branch the org overlay assigns (never a fixed default branch).
+        by_code = {b["branch_code"]: b for b in BRANCH_REGISTRY}
+        org = by_code.get(str(rec.get("branch_code", ""))) or branch_for(loan_id, scoring_input["state"])
+        branch_code, branch_name = org["branch_code"], org["branch_name"]
+        zone, region = org["zone"], org["region"]
 
         loan_item = {
             "loan_id": loan_id,
@@ -718,7 +926,7 @@ async def batch_upload(request: Request) -> dict[str, Any]:
             "cibil_score": scoring_input["cibil_score"],
             "dpd": scoring_input["dpd"],
             "overdue_amt": float(rec.get("overdue_amt", 0.0)),
-            "emi_bounce_6m": scoring_input["emi_bounce_6m"],
+            "emi_bounce_6m": scoring_input.get("emi_bounce_6m"),
             "lien_flag": scoring_input["lien_flag"],
             "restructuring_flag": scoring_input["restructuring_flag"],
             "gst_filing_delay_days": scoring_input["gst_filing_delay_days"],
@@ -750,7 +958,20 @@ async def batch_upload(request: Request) -> dict[str, Any]:
         }
         scored_records.append(loan_item)
 
-    bulk_upsert_loans(scored_records)
+    if not scored_records:
+        raise HTTPException(
+            status_code=422,
+            detail={"message": "No record in the batch could be scored", "refused": refused[:50]},
+        )
+
+    if persist:
+        existing_ids = {r["loan_id"] for r in scored_records if get_db_borrower(r["loan_id"]) is not None}
+        to_save = scored_records if rerate else [r for r in scored_records if r["loan_id"] not in existing_ids]
+        skipped_existing = sorted({r["loan_id"] for r in scored_records} - {r["loan_id"] for r in to_save})
+    else:
+        to_save, skipped_existing = [], []
+    if to_save:
+        bulk_upsert_loans(to_save)
 
     total_acc = len(scored_records)
     high_severe = sum(1 for r in scored_records if r["pd_12m"] >= 0.16)
@@ -764,20 +985,25 @@ async def batch_upload(request: Request) -> dict[str, Any]:
         grade_dist[g] = grade_dist.get(g, 0) + 1
 
     run_id = f"batch_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:4]}"
-    log_watchlist_run(
-        run_id=run_id,
-        segment=segment,
-        total_accounts=total_acc,
-        high_severe_count=high_severe,
-        total_ecl=total_ecl_sum,
-        mean_pd=mean_pd,
-        max_pd=max_pd,
-        grade_distribution=grade_dist,
-    )
+    if persist:
+        log_watchlist_run(
+            run_id=run_id,
+            segment=segment,
+            total_accounts=total_acc,
+            high_severe_count=high_severe,
+            total_ecl=total_ecl_sum,
+            mean_pd=mean_pd,
+            max_pd=max_pd,
+            grade_distribution=grade_dist,
+        )
 
     return {
         "status": "success",
         "run_id": run_id,
+        "persisted": persist,
+        "saved_accounts": len(to_save),
+        "skipped_existing": skipped_existing,
+        "refused": refused,
         "segment": segment,
         "total_accounts": total_acc,
         "high_severe_count": high_severe,

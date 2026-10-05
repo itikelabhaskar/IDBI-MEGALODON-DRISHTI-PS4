@@ -59,7 +59,7 @@ def extract_transactions(payload: Mapping[str, Any] | Sequence[Any]) -> list[dic
             if isinstance(tx_list, list):
                 return tx_list
 
-    # 2. Finacle API 393 structure
+    # 2. core-banking statement structure
     result = payload.get("result") if isinstance(payload.get("result"), dict) else payload
     for key in ("statementRecords", "statementDetails", "transactions", "acctStmtList", "records"):
         candidate = result.get(key)

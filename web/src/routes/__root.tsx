@@ -11,6 +11,7 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { RoleProvider } from "@/lib/role-context";
 import { AppShell } from "@/components/drishti/app-shell";
+import { RouteGuard } from "@/components/drishti/route-guard";
 import { BrandMark } from "@/components/drishti/brand";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
@@ -34,7 +35,7 @@ function BareLayout({ children }: { children: ReactNode }) {
 function NotFoundComponent() {
   return (
     <BareLayout>
-      <div className="mt-4 text-[10px] uppercase tracking-widest text-muted-foreground">404</div>
+      <div className="mt-4 text-[11px] uppercase tracking-widest text-muted-foreground">404</div>
       <h1 className="mt-1 text-xl font-semibold text-foreground">Page not found</h1>
       <p className="mt-1 text-sm text-muted-foreground">
         The borrower or page you're looking for doesn't exist.
@@ -56,14 +57,40 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   useEffect(() => {
     // Local, in-app error logging only — no third-party telemetry (DPDP-safe).
     console.error("[DRISHTI] root error boundary:", error);
+    // A tab opened before a redeploy asks for page code that no longer exists
+    // ("Failed to fetch dynamically imported module"). One reload fetches the new
+    // build; the session flag stops a reload loop if the server itself is broken.
+    const stale = /dynamically imported module|Importing a module script failed|ChunkLoadError/i.test(String(error?.message));
+    if (stale && typeof window !== "undefined" && !sessionStorage.getItem("drishti_chunk_reload")) {
+      sessionStorage.setItem("drishti_chunk_reload", "1");
+      window.location.reload();
+    }
   }, [error]);
+
+  const handleResetSession = () => {
+    try {
+      sessionStorage.clear();
+      localStorage.removeItem("drishti.session.v1");
+      localStorage.removeItem("drishti_boot_completed");
+    } catch {
+      /* ignore */
+    }
+    window.location.href = "/";
+  };
 
   return (
     <BareLayout>
-      <h1 className="mt-4 text-xl font-semibold text-foreground">This page didn't load</h1>
+      <h1 className="mt-4 text-xl font-semibold text-foreground">Something went wrong</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Something went wrong. Try again or head back to the console.
+        An unexpected application error occurred. You can retry or reset session state.
       </p>
+
+      {error?.message && (
+        <div className="mt-4 max-h-32 overflow-auto rounded bg-muted/60 p-2.5 text-left font-mono text-xs text-muted-foreground break-words border border-border/50">
+          <p className="font-semibold text-destructive">{error.name}: {error.message}</p>
+        </div>
+      )}
+
       <div className="mt-5 flex flex-wrap justify-center gap-2">
         <Button
           onClick={() => {
@@ -72,6 +99,12 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
           }}
         >
           Try again
+        </Button>
+        <Button
+          variant="outline"
+          onClick={handleResetSession}
+        >
+          Reset Session & Reload
         </Button>
         <a
           href="/"
@@ -137,7 +170,9 @@ function RootComponent() {
         <TooltipProvider delayDuration={150}>
           <GuidedTipsProvider>
             <AppShell>
-              <Outlet />
+              <RouteGuard>
+                <Outlet />
+              </RouteGuard>
             </AppShell>
             <CommandPalette />
             <Toaster richColors closeButton position="bottom-right" />

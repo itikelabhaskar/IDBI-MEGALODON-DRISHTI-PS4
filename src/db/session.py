@@ -69,9 +69,53 @@ def get_db_engine(url_or_path: Path | str | None = None) -> Engine:
     return _ENGINES[url]
 
 
+# Columns added after the first release; created on existing databases at start-up.
+_ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
+    "loan_accounts": [
+        ("reviewed_status", "VARCHAR(32) DEFAULT 'PENDING'"),
+        ("reviewed_by", "VARCHAR(64)"),
+        ("reviewed_at", "TIMESTAMP"),
+        ("officer_notes", "TEXT"),
+        ("committee_grade", "VARCHAR(16)"),
+    ],
+    "decisions": [
+        ("revised_grade", "VARCHAR(16)"),
+        ("role", "VARCHAR(128)"),
+    ],
+}
+
+
+def _ensure_loan_account_columns(engine: Engine) -> None:
+    """Add columns introduced after a database was created (minimal migration)."""
+    from sqlalchemy import text
+    try:
+        with engine.connect() as conn:
+            for table, new_cols in _ADDED_COLUMNS.items():
+                if engine.dialect.name == "sqlite":
+                    res = conn.execute(text(f"PRAGMA table_info({table})"))
+                    cols = [str(row[1]) for row in res.fetchall()]
+                elif engine.dialect.name == "postgresql":
+                    res = conn.execute(text(
+                        "SELECT column_name FROM information_schema.columns WHERE table_name = :t"
+                    ), {"t": table})
+                    cols = [str(row[0]) for row in res.fetchall()]
+                else:
+                    cols = []
+                if not cols:
+                    continue
+                for col_name, col_type in new_cols:
+                    if col_name not in cols:
+                        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}"))
+            conn.commit()
+    except Exception:
+        if engine.dialect.name != "sqlite":
+            raise
+
+
 def init_db(url_or_path: Path | str | None = None) -> None:
     engine = get_db_engine(url_or_path)
     Base.metadata.create_all(bind=engine)
+    _ensure_loan_account_columns(engine)
     seed_portfolio_if_empty(url_or_path)
 
 
@@ -107,10 +151,12 @@ def log_decision(
     override_action: str | None = None,
     reason: str = "",
     officer: str = "demo_officer",
+    revised_grade: str | None = None,
+    role: str | None = None,
     url_or_path: Path | str | None = None,
 ) -> int:
     dec = str(decision).strip().lower()
-    valid_decisions = {"accept", "override", "defer", "reject"}
+    valid_decisions = {"accept", "override", "defer", "reject", "restructure"}
     if dec not in valid_decisions:
         raise ValueError(f"decision must be one of {valid_decisions}, got {decision!r}")
 
@@ -127,6 +173,8 @@ def log_decision(
         override_action=override_action,
         reason=reason,
         officer=officer,
+        revised_grade=revised_grade,
+        role=role,
         ts=ts,
     )
     with get_db(url_or_path) as session:
@@ -425,6 +473,19 @@ def get_portfolio(
         }
 
 
+def _snapshot_model_card() -> dict[str, Any]:
+    """Model card the console snapshot was built with, so every page quotes one source."""
+    path = ROOT / "web" / "src" / "lib" / "data" / "portfolio-snapshot.json"
+    try:
+        card = json.loads(path.read_text(encoding="utf-8")).get("model_card", {})
+    except Exception:
+        card = {}
+    return {k: card.get(k) for k in (
+        "auc", "capture_top10", "lift_top10", "brier_calibrated",
+        "base_default_rate", "propensity_at_threshold", "threshold",
+    )}
+
+
 def get_portfolio_kpis(
     branch_code: str | None = None,
     url_or_path: Path | str | None = None,
@@ -450,16 +511,7 @@ def get_portfolio_kpis(
                 "red_count": 0,
                 "grade_distribution": {},
                 "rag_distribution": {"Green": 0, "Amber": 0, "Red": 0},
-                "model_card": {
-                    "auc": 0.8562,
-                    "capture_top10": 0.5808,
-                    "lift_top10": 5.8,
-                    "brier_calibrated": 0.0307,
-                    "base_default_rate": 0.0389,
-                    "propensity_at_threshold": 0.2593,
-                    "threshold": 0.16,
-                    "flag_rate": 0.0,
-                },
+                "model_card": {**_snapshot_model_card(), "flag_rate": 0.0},
             }
 
         total_sanctioned = sum(l.sanction_limit or 0.0 for l in loans)
@@ -504,16 +556,9 @@ def get_portfolio_kpis(
                 "Amber": amber_count,
                 "Red": red_count,
             },
-            "model_card": {
-                "auc": 0.8562,
-                "capture_top10": 0.5808,
-                "lift_top10": 5.8,
-                "brier_calibrated": 0.0307,
-                "base_default_rate": 0.0389,
-                "propensity_at_threshold": 0.2593,
-                "threshold": 0.16,
-                "flag_rate": round(flag_rate, 4),
-            },
+            # Model metrics come from the snapshot's model card (read from
+            # metrics.json when it was built); the flag rate is this book's.
+            "model_card": {**_snapshot_model_card(), "flag_rate": round(flag_rate, 4)},
         }
 
 
@@ -540,7 +585,9 @@ def get_branch_rollups(url_or_path: Path | str | None = None) -> list[dict[str, 
             green = sum(1 for l in b_loans if l.rag == "Green")
             amber = sum(1 for l in b_loans if l.rag == "Amber")
             red = sum(1 for l in b_loans if l.rag == "Red")
-            actual_default_rate = round(flag_rate * 0.45, 4)
+            # The loan master carries no outcome labels, so a realised default rate
+            # cannot be computed here; the snapshot rollup computes it from labels.
+            actual_default_rate = None
 
             rollups.append({
                 "zone": first.zone or "South",
@@ -587,10 +634,14 @@ def upsert_loan(data: dict[str, Any], url_or_path: Path | str | None = None) -> 
             "dpd", "overdue_amt", "emi_bounce_6m", "lien_flag", "restructuring_flag",
             "gst_filing_delay_days", "itc_mismatch_flag", "pd_12m", "risk_grade",
             "rag", "sma_status", "ecl", "ecl_stage", "lifetime_ecl",
-            "recommended_action", "review_cadence", "action_owner", "raw_features_json"
+            "recommended_action", "review_cadence", "action_owner", "raw_features_json",
+            "reviewed_status", "reviewed_by", "reviewed_at", "officer_notes", "committee_grade"
         ]:
             if k in data and data[k] is not None:
                 setattr(loan, k, data[k])
+        # A re-appraisal without an override clears an earlier committee grade.
+        if "committee_grade" in data:
+            loan.committee_grade = data["committee_grade"]
 
         session.flush()
         return loan.to_dict()
@@ -615,12 +666,40 @@ def bulk_upsert_loans(
                 "dpd", "overdue_amt", "emi_bounce_6m", "lien_flag", "restructuring_flag",
                 "gst_filing_delay_days", "itc_mismatch_flag", "pd_12m", "risk_grade",
                 "rag", "sma_status", "ecl", "ecl_stage", "lifetime_ecl",
-                "recommended_action", "review_cadence", "action_owner", "raw_features_json"
+                "recommended_action", "review_cadence", "action_owner", "raw_features_json",
+                "reviewed_status", "reviewed_by", "reviewed_at", "officer_notes", "committee_grade"
             ]:
                 if k in rec and rec[k] is not None:
                     setattr(loan, k, rec[k])
             count += 1
         return count
+
+
+def update_loan_review_status(
+    loan_id: str,
+    status: str,
+    reviewed_by: str | None = None,
+    notes: str | None = None,
+    committee_grade: str | None = None,
+    url_or_path: Path | str | None = None,
+) -> dict[str, Any]:
+    """Update officer review status ('PENDING', 'REVIEWED', 'FLAGGED_SARB', 'RESTRUCTURE') for a loan."""
+    init_db(url_or_path)
+    with get_db(url_or_path) as session:
+        loan = session.get(LoanAccount, str(loan_id))
+        if not loan:
+            raise KeyError(f"Loan account '{loan_id}' not found in database")
+        loan.reviewed_status = str(status).strip().upper()
+        if reviewed_by:
+            loan.reviewed_by = str(reviewed_by).strip()
+        loan.reviewed_at = datetime.now(timezone.utc)
+        if notes is not None:
+            loan.officer_notes = str(notes)
+        # Only an override carries a committee grade; any later decision returns
+        # the account to its model grade.
+        loan.committee_grade = committee_grade
+        session.flush()
+        return loan.to_dict()
 
 
 # --------------------------------------------------------------------------- #

@@ -75,6 +75,13 @@ export interface BorrowerScore {
   region?: string;
   branch_code?: string;
   branch_name?: string;
+  /** Officer review and supervisory status in database. */
+  reviewed_status?: "PENDING" | "REVIEWED" | "DEFERRED" | "FLAGGED_SARB" | "RESTRUCTURE";
+  /** Grade set by a committee override; `risk_grade` stays the model's grade. */
+  committee_grade?: string | null;
+  reviewed_by?: string;
+  reviewed_at?: string;
+  officer_notes?: string;
   /**
    * Raw canonical fields as sent to the model, echoed by
    * src.pipelines.make_ui_snapshot so the console can POST them back to
@@ -104,7 +111,8 @@ export interface BranchSummary {
   amber: number;
   red: number;
   /** Synthetic ground truth — lets the officer see predicted vs realised. */
-  actual_default_rate: number;
+  /** Null in live mode: the loan master holds no outcome labels. */
+  actual_default_rate: number | null;
 }
 
 export interface PortfolioSnapshot {
@@ -140,7 +148,7 @@ export interface DecisionRecord {
   id?: number | string;
   loan_id: string;
   segment?: string;
-  decision: "accept" | "override" | "defer" | "reject";
+  decision: "accept" | "override" | "defer" | "reject" | "restructure";
   original_grade?: string;
   revised_grade?: string;
   override_action?: string;
@@ -150,11 +158,13 @@ export interface DecisionRecord {
   officer?: string;
   role?: string;
   ts?: string;
+  /** Model grade when the decision was taken (server records). */
+  risk_grade?: string;
 }
 
 export interface DecisionCreate {
   loan_id: string;
-  decision: "accept" | "override" | "defer" | "reject";
+  decision: "accept" | "override" | "defer" | "reject" | "restructure";
   segment?: string;
   proposed_action?: string;
   proposed_sma?: string;
@@ -221,7 +231,8 @@ export interface UnderwriteSubmitPayload {
   branch_name?: string;
   zone?: string;
   region?: string;
-  decision?: "accept" | "override" | "defer" | "reject";
+  mode?: "new" | "rerate";
+  decision?: "accept" | "override" | "defer" | "reject" | "restructure";
   revised_grade?: string;
   override_action?: string;
   rationale?: string;

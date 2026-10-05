@@ -118,10 +118,13 @@ export default defineConfig({
     nitro({
       preset: process.env.NITRO_PRESET || "node-server",
       noExternals: true,
+      // Pre-compressed JS/CSS for the slow SSM path (see src/server.ts). Off for
+      // the static HF build, whose uploader rejects the binary .gz/.br files.
+      compressPublicAssets: process.env.DRISHTI_STATIC_BUILD === "true" ? false : { gzip: true, brotli: true },
+      // /api/** is proxied by server/api-proxy.ts (gzips the JSON); the two
+      // FastAPI documentation routes stay plain proxy rules.
+      handlers: [{ route: "/api/**", handler: "./server/api-proxy.ts" }],
       routeRules: {
-        "/api/**": {
-          proxy: `${(process.env.DRISHTI_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "")}/**`,
-        },
         "/docs": {
           proxy: `${(process.env.DRISHTI_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "")}/docs`,
         },

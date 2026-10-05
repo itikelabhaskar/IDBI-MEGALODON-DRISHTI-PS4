@@ -185,12 +185,12 @@ The data pipeline enforces the canonical schema seam with strict zero-leakage gu
 flowchart TB
     subgraph S1["1. Raw Data Extraction & Multi-Source Ingestion"]
         direction TB
-        F_402["API 402 getLoanOverdueDetails\n(NPA status, DPD, overdue amount)"]
-        F_404["API 404 getLoanOverduePosition\n(Demanded vs collected principal/interest)"]
-        F_391["API 391 getLoanAccountDetails\n(Origination date, ticket, restructuring flag)"]
-        F_441["API 441 fetchLoanAccountLimits\n(Drawing power, sanction limit gap)"]
-        F_362["API 362 accountLienEnquiry\n(Lien flag, encumbrances)"]
-        F_408["API 408 fetchCibilScore\n(CIBIL score, credit history)"]
+        F_OVD["Loan overdue details\n(NPA status, DPD, overdue amount)"]
+        F_POS["Overdue position\n(Demanded vs collected principal/interest)"]
+        F_PROF["Loan account profile\n(Origination date, ticket, restructuring flag)"]
+        F_LIM["Loan limits and drawing power\n(Drawing power, sanction limit gap)"]
+        F_LIEN["Account liens\n(Lien flag, encumbrances)"]
+        F_BUR["Credit bureau score\n(CIBIL score, credit history)"]
         ALT_DATA["GST Returns + Account Aggregator\n(filing delay, turnover trend, cash flow volatility)"]
         UNSTR["Loan Officer Free-Text Notes\n(disputes, promises, disruption keywords)"]
     end
@@ -249,12 +249,12 @@ flowchart TB
         CORE_LOS["Core Banking / LOS / Collections\n(Automated credit memo & loan monitoring)"]
     end
 
-    F_402 --> ADAPTER
-    F_404 --> ADAPTER
-    F_391 --> ADAPTER
-    F_441 --> ADAPTER
-    F_362 --> ADAPTER
-    F_408 --> ADAPTER
+    F_OVD --> ADAPTER
+    F_POS --> ADAPTER
+    F_PROF --> ADAPTER
+    F_LIM --> ADAPTER
+    F_LIEN --> ADAPTER
+    F_BUR --> ADAPTER
     ALT_DATA --> ADAPTER
     UNSTR --> ADAPTER
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Slider } from "@/components/ui/slider";
@@ -20,7 +20,7 @@ import {
   Tooltip,
   ZAxis,
 } from "recharts";
-import { getSnapshot, simulateContagion, fetchBranches } from "@/lib/api";
+import { getSnapshot, useBook, simulateContagion, fetchBranches } from "@/lib/api";
 import type { ContagionSimulateResponse, BranchSummary, ContagionScatterPoint, RagBucket } from "@/lib/types";
 import { formatPercent, formatInrCompact, ragHex } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -45,9 +45,13 @@ import {
   GuidedTooltip,
   HintIcon,
 } from "@/components/drishti/guided-tooltip";
+import { PageApiDrawer } from "@/components/drishti/page-api-drawer";
 
 export const Route = createFileRoute("/contagion")({
-  component: ContagionView,
+  // Folded into Market Explorer; the old address still works.
+  beforeLoad: () => {
+    throw redirect({ to: "/market", search: { tab: "contagion" } });
+  },
 });
 
 function ContagionTooltip({ active, payload }: any) {
@@ -72,7 +76,7 @@ function ContagionTooltip({ active, payload }: any) {
     <div className="rounded-lg border border-border bg-surface p-2.5 shadow-lg text-xs space-y-1.5 min-w-48">
       <div className="flex items-center justify-between gap-2 border-b border-border/60 pb-1">
         <span className="font-semibold text-foreground">{pt.id}</span>
-        <Badge variant="outline" className={`text-[10px] font-normal ${statusBadge}`}>
+        <Badge variant="outline" className={`text-[11px] font-normal ${statusBadge}`}>
           {statusLabel}
         </Badge>
       </div>
@@ -113,8 +117,8 @@ function ContagionTooltip({ active, payload }: any) {
  * Supplier-graph contagion view.
  * Powered by live NetworkX DiGraph cascade simulation in backend /contagion/simulate.
  */
-function ContagionView() {
-  const borrowers = getSnapshot().borrowers;
+export function ContagionView() {
+  const borrowers = useBook();
   const [transmissionRate, setTransmissionRate] = useState(0.35);
   const [maxRounds, setMaxRounds] = useState(4);
   const [stressThreshold, setStressThreshold] = useState(0.16);
@@ -303,27 +307,13 @@ function ContagionView() {
     <div className="p-4 md:p-6 space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div>
-          <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
-            Supplier-graph signals · e-invoice / MCA links · NetworkX cascade engine
-          </div>
-          <div className="flex items-center gap-2 mt-0.5">
-            <h1 className="text-xl font-semibold text-foreground">Supplier Contagion</h1>
-            {isLiveEngine ? (
-              <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-[10px] font-normal">
-                ● Live Graph Cascade ({liveData?.total_nodes ?? filteredBorrowers.length} Nodes · {liveData?.total_edges ?? 1631} Edges)
-              </Badge>
-            ) : (
-              <Badge variant="outline" className="bg-muted text-muted-foreground text-[10px] font-normal">
-                Offline Snapshot
-              </Badge>
-            )}
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-lg font-semibold text-foreground">Supplier Contagion</h2>
+            <PageApiDrawer routePath="/contagion" triggerLabel="Network & Trade APIs" />
             {isSimulating && (
-              <span className="text-[10px] text-muted-foreground animate-pulse">Computing graph cascade...</span>
+              <span className="text-[11px] text-muted-foreground animate-pulse">Computing graph cascade...</span>
             )}
           </div>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            Simulate how default clusters ripple through the supplier-buyer network to preempt domino distress.
-          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -348,7 +338,7 @@ function ContagionView() {
               <button
                 type="button"
                 onClick={() => setSelectedSeeds([])}
-                className="ml-1 text-muted-foreground hover:text-foreground inline-flex items-center gap-0.5 text-[10px] underline cursor-pointer"
+                className="ml-1 text-muted-foreground hover:text-foreground inline-flex items-center gap-0.5 text-[11px] underline cursor-pointer"
               >
                 <RotateCcw className="h-2.5 w-2.5" /> Reset
               </button>
@@ -395,7 +385,7 @@ function ContagionView() {
 
       {/* Contagion Cascade KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <GuidedTooltip content="Total verified commercial trade linkages reconstructed from MCA filings, e-invoicing GST data, and Finacle CASA counterparty flows.">
+        <GuidedTooltip content="Supplier–buyer links in the synthetic graph. The bank supplies no trade-link data; in production these would come from e-invoice / GST counterparty data or CASA counterparty flows.">
           <Card className="bg-surface p-3 transition-shadow hover:shadow-sm">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span className="flex items-center gap-1">
@@ -407,7 +397,7 @@ function ContagionView() {
             <div className="mt-1 text-lg font-semibold tabular-nums">
               {liveData?.total_edges ?? 1631}
             </div>
-            <div className="text-[10px] text-muted-foreground">
+            <div className="text-[11px] text-muted-foreground">
               Across {liveData?.total_nodes ?? borrowers.length} counterparty facilities
             </div>
           </Card>
@@ -426,7 +416,7 @@ function ContagionView() {
               {liveData?.initial_stressed_nodes ?? 28} ➔{" "}
               <span className="text-rose-600">{liveData?.final_stressed_nodes ?? 31}</span>
             </div>
-            <div className="text-[10px] text-muted-foreground">
+            <div className="text-[11px] text-muted-foreground">
               T0 baseline ➔ Post-cascade
             </div>
           </Card>
@@ -439,14 +429,14 @@ function ContagionView() {
           >
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>Contagion Spread</span>
-              <span className="text-[9px] text-primary opacity-0 group-hover:opacity-100 transition-opacity">
+              <span className="text-[11px] text-primary opacity-0 group-hover:opacity-100 transition-opacity">
                 Inspect hubs ↓
               </span>
             </div>
             <div className="mt-1 text-lg font-semibold tabular-nums text-rose-600">
               +{liveData?.contagion_spread_count ?? 3} accounts
             </div>
-            <div className="text-[10px] text-muted-foreground">
+            <div className="text-[11px] text-muted-foreground">
               Pushed to stress via upstream dependencies
             </div>
           </Card>
@@ -459,14 +449,14 @@ function ContagionView() {
           >
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>Cascade ECL Delta</span>
-              <span className="text-[9px] text-primary opacity-0 group-hover:opacity-100 transition-opacity">
+              <span className="text-[11px] text-primary opacity-0 group-hover:opacity-100 transition-opacity">
                 Inspect hubs ↓
               </span>
             </div>
             <div className="mt-1 text-lg font-semibold tabular-nums text-band-d">
               +{formatInrCompact(liveData?.cascade_ecl_delta ?? 2450000)}
             </div>
-            <div className="text-[10px] text-muted-foreground">
+            <div className="text-[11px] text-muted-foreground">
               Induced portfolio provision shock
             </div>
           </Card>
@@ -513,7 +503,7 @@ function ContagionView() {
               step={5}
               onValueChange={(v) => setTransmissionRate(v[0] / 100)}
             />
-            <div className="flex justify-between text-[10px] text-muted-foreground">
+            <div className="flex justify-between text-[11px] text-muted-foreground">
               <span>10% (Low spillover)</span>
               <span>80% (High contagion)</span>
             </div>
@@ -536,7 +526,7 @@ function ContagionView() {
               step={1}
               onValueChange={(v) => setMaxRounds(v[0])}
             />
-            <div className="flex justify-between text-[10px] text-muted-foreground">
+            <div className="flex justify-between text-[11px] text-muted-foreground">
               <span>1 Round (Direct)</span>
               <span>8 Rounds (Systemic)</span>
             </div>
@@ -591,7 +581,7 @@ function ContagionView() {
                 <button
                   type="button"
                   onClick={() => setActiveRound(activeRound === rh.round ? null : rh.round)}
-                  className={`text-[10px] font-medium shrink-0 rounded-full border px-2.5 py-0.5 transition-all cursor-pointer ${
+                  className={`text-[11px] font-medium shrink-0 rounded-full border px-2.5 py-0.5 transition-all cursor-pointer ${
                     activeRound === rh.round
                       ? "ring-2 ring-primary ring-offset-1 font-semibold shadow-xs"
                       : "hover:opacity-85"
@@ -611,7 +601,7 @@ function ContagionView() {
               <button
                 type="button"
                 onClick={() => setActiveRound(null)}
-                className="text-[10px] text-muted-foreground hover:text-foreground underline cursor-pointer shrink-0"
+                className="text-[11px] text-muted-foreground hover:text-foreground underline cursor-pointer shrink-0"
               >
                 Clear Round Filter
               </button>
@@ -629,19 +619,19 @@ function ContagionView() {
               Active Network Filters:
             </span>
             {selectedSector !== "all" && (
-              <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary text-[10px] font-medium flex items-center gap-1">
+              <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary text-[11px] font-medium flex items-center gap-1">
                 Sector: {selectedSector.replace(/_/g, " ")}
                 <X className="h-2.5 w-2.5 cursor-pointer hover:opacity-75" onClick={() => setSelectedSector("all")} />
               </Badge>
             )}
             {selectedCommunity !== null && (
-              <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary text-[10px] font-medium flex items-center gap-1">
+              <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary text-[11px] font-medium flex items-center gap-1">
                 Cluster: {selectedCommunity.replace(/_/g, " ").replace("·", " — ")}
                 <X className="h-2.5 w-2.5 cursor-pointer hover:opacity-75" onClick={() => setSelectedCommunity(null)} />
               </Badge>
             )}
             {activeRound !== null && (
-              <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary text-[10px] font-medium flex items-center gap-1">
+              <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary text-[11px] font-medium flex items-center gap-1">
                 Cascade Wave: Round {activeRound}
                 <X className="h-2.5 w-2.5 cursor-pointer hover:opacity-75" onClick={() => setActiveRound(null)} />
               </Badge>
@@ -658,7 +648,7 @@ function ContagionView() {
               setSelectedCommunity(null);
               setActiveRound(null);
             }}
-            className="h-6 px-2 text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
+            className="h-6 px-2 text-[11px] text-muted-foreground hover:text-foreground cursor-pointer"
           >
             Reset All Filters
           </Button>
@@ -671,11 +661,8 @@ function ContagionView() {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle className="text-sm">Exposure vs Post-Cascade PD — Contagion Scatter</CardTitle>
-                <CardDescription className="text-xs">
-                  Each dot is an account; purple dots identify facilities newly infected via supplier links.
-                </CardDescription>
               </div>
-              <div className="flex items-center gap-2 text-[10px]">
+              <div className="flex items-center gap-2 text-[11px]">
                 <GuidedTooltip content="Stable risk grade (PD < 2%) with healthy counterparty solvency">
                   <span className="inline-flex items-center gap-1 cursor-help"><span className="h-2 w-2 rounded-full bg-emerald-500"></span> Green</span>
                 </GuidedTooltip>
@@ -757,15 +744,12 @@ function ContagionView() {
                 <button
                   type="button"
                   onClick={() => setSelectedCommunity(null)}
-                  className="text-[10px] text-primary hover:underline flex items-center gap-0.5 cursor-pointer"
+                  className="text-[11px] text-primary hover:underline flex items-center gap-0.5 cursor-pointer"
                 >
                   <X className="h-2.5 w-2.5" /> Clear Filter
                 </button>
               )}
             </div>
-            <CardDescription className="text-xs">
-              State × Sector communities ranked by post-cascade average PD. Click to filter network.
-            </CardDescription>
           </CardHeader>
           <CardContent className="p-0 max-h-80 overflow-y-auto">
             <ul className="divide-y divide-border">
@@ -792,12 +776,12 @@ function ContagionView() {
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
                       {c.infected_count != null && c.infected_count > 0 && (
-                        <Badge variant="outline" className="bg-purple-500/15 text-purple-600 border-purple-500/30 text-[10px] font-normal">
+                        <Badge variant="outline" className="bg-purple-500/15 text-purple-600 border-purple-500/30 text-[11px] font-normal">
                           +{c.infected_count} spread
                         </Badge>
                       )}
                       {c.redCount > 0 && (
-                        <Badge variant="outline" className="bg-band-d/15 text-band-d border-band-d/30 font-normal text-[10px]">
+                        <Badge variant="outline" className="bg-band-d/15 text-band-d border-band-d/30 font-normal text-[11px]">
                           {c.redCount} red
                         </Badge>
                       )}
@@ -830,9 +814,6 @@ function ContagionView() {
                   Top Systemic Contagion Hubs (Super-Spreaders)
                   <HintIcon text="Identified via network centrality and counterparty exposure volume. Shocker button allows testing targeted counterparty firewalls." />
                 </CardTitle>
-                <CardDescription className="text-xs">
-                  Facilities with high PageRank centrality and stressed counterparties whose default triggers the widest ripple effect.
-                </CardDescription>
               </div>
               <Badge variant="outline" className="text-xs font-normal">
                 Top {hubs.length} Systemic Nodes
@@ -903,7 +884,7 @@ function ContagionView() {
                         {h.sector.replace(/_/g, " ")}
                       </td>
                       <td className="px-4 py-2.5 tabular-nums">
-                        <Badge variant="outline" className={`text-[10px] font-normal ${h.stressed_neighbors >= 3 ? "border-rose-500/30 text-rose-600 bg-rose-500/10" : ""}`}>
+                        <Badge variant="outline" className={`text-[11px] font-normal ${h.stressed_neighbors >= 3 ? "border-rose-500/30 text-rose-600 bg-rose-500/10" : ""}`}>
                           {h.stressed_neighbors} upstream stressed
                         </Badge>
                       </td>
@@ -929,7 +910,7 @@ function ContagionView() {
                                 : [...prev, h.loan_id],
                             );
                           }}
-                          className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium border transition-colors ${
+                          className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium border transition-colors ${
                             selectedSeeds.includes(h.loan_id)
                               ? "bg-rose-500/20 text-rose-600 border-rose-500/40"
                               : "bg-surface text-muted-foreground border-border hover:text-foreground hover:border-primary/50"
@@ -952,9 +933,9 @@ function ContagionView() {
         <CardContent className="flex items-start gap-3 pt-5">
           <Network className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
           <p className="text-xs leading-relaxed text-muted-foreground">
-            Contagion Architecture: Graph features (<code className="rounded bg-muted px-1 py-0.5 text-[10px]">degree_centrality</code>,{" "}
-            <code className="rounded bg-muted px-1 py-0.5 text-[10px]">pagerank</code>,{" "}
-            <code className="rounded bg-muted px-1 py-0.5 text-[10px]">stressed_neighbors</code>) enter the cascade simulation through observable counterparty commercial links (e-invoice GST counterparties & Finacle CASA flows) — never future labels. The live backend runs an iterative Eisenberg-Noe / DebtRank cascade model across the operational <code className="rounded bg-muted px-1 py-0.5 text-[10px]">LoanAccount</code> database.
+            Contagion Architecture: Graph features (<code className="rounded bg-muted px-1 py-0.5 text-[11px]">degree_centrality</code>,{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-[11px]">pagerank</code>,{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-[11px]">stressed_neighbors</code>) enter the cascade simulation through observable counterparty commercial links (e-invoice GST counterparties & Finacle CASA flows) — never future labels. The live backend runs an iterative Eisenberg-Noe / DebtRank cascade model across the operational <code className="rounded bg-muted px-1 py-0.5 text-[11px]">LoanAccount</code> database.
           </p>
         </CardContent>
       </Card>

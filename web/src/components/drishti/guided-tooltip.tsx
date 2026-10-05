@@ -113,7 +113,7 @@ export function GuidedTooltip({
             <div className="flex items-center gap-1.5">
               <Lightbulb className="h-3.5 w-3.5 text-amber-500 shrink-0" />
               {step && (
-                <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-600 dark:text-amber-300">
+                <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[11px] font-bold text-amber-600 dark:text-amber-300">
                   Step {step}
                 </span>
               )}
@@ -125,8 +125,8 @@ export function GuidedTooltip({
           <div className="text-[11px] leading-relaxed text-muted-foreground">
             {effectiveTip}
           </div>
-          <div className="flex items-center justify-between pt-1.5 text-[10px] text-muted-foreground border-t border-border/60">
-            <span className="text-[9px] text-muted-foreground flex items-center gap-1">
+          <div className="flex items-center justify-between pt-1.5 text-[11px] text-muted-foreground border-t border-border/60">
+            <span className="text-[11px] text-muted-foreground flex items-center gap-1">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
               RBI Regulatory Context
             </span>
@@ -137,7 +137,7 @@ export function GuidedTooltip({
                 e.stopPropagation();
                 setTipsEnabled?.(false);
               }}
-              className="text-[10px] font-medium text-amber-600 dark:text-amber-400 hover:underline cursor-pointer transition-colors"
+              className="text-[11px] font-medium text-amber-600 dark:text-amber-400 hover:underline cursor-pointer transition-colors"
             >
               Turn off tips
             </button>
@@ -236,12 +236,12 @@ export function HintIcon({
           <div className="text-[11px] leading-relaxed text-muted-foreground">
             {text}
           </div>
-          <div className="pt-1 flex items-center justify-between text-[9px] text-muted-foreground/80 border-t border-border/40">
+          <div className="pt-1 flex items-center justify-between text-[11px] text-muted-foreground/80 border-t border-border/40">
             <span className="flex items-center gap-1">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
               IDBI Risk Framework
             </span>
-            <span className="text-[9px] text-muted-foreground/60">
+            <span className="text-[11px] text-muted-foreground/60">
               {pinned ? "Pinned · click outside to close" : "Click to pin note"}
             </span>
           </div>

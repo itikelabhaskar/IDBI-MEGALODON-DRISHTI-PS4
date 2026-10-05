@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import joblib
 import pandas as pd
 
@@ -19,8 +21,10 @@ from src.framework.interpretation import (
     assign_ecl_stage,
     assign_grade,
     calculate_ind_as_109_ecl,
+    dpd_regulatory_floor,
     enrich,
     expected_credit_loss,
+    grade_rank,
     playbook,
     rag_bucket,
 )
@@ -92,7 +96,7 @@ class RiskScorer:
                 run_idbi(n_trials=5, n_rows=2000)
             elif self.segment == "msme_india":
                 from src.pipelines.run_india import run as run_india
-                run_india(n_trials=3, run_ablation=False)
+                run_india(n_trials=3)
 
         try:
             self.bundle = joblib.load(model_path)
@@ -103,7 +107,7 @@ class RiskScorer:
                 self.bundle = joblib.load(model_path)
             elif self.segment == "msme_india":
                 from src.pipelines.run_india import run as run_india
-                run_india(n_trials=3, run_ablation=False)
+                run_india(n_trials=3)
                 self.bundle = joblib.load(model_path)
             else:
                 raise
@@ -151,6 +155,11 @@ class RiskScorer:
         return scored
 
     # --- Single-record scoring (API) -------------------------------------
+    def features_for(self, record: dict) -> pd.DataFrame:
+        """The engineered feature row the model scores for one raw record."""
+        canonical = pd.DataFrame([self._record_to_canonical(record)])
+        return self.spec.engineer(canonical)
+
     def score_record(self, record: dict, explain: bool = True) -> dict:
         provided = [
             c for c in self.spec.raw_defaults
@@ -182,9 +191,32 @@ class RiskScorer:
         act = playbook(grade)
         rag = rag_bucket(grade)
 
+        # An overdue account's regulatory status is fixed by its DPD, whatever the
+        # model says. The model never sees DPD, so the PD and grade stay its own;
+        # the watch bucket, action and Ind AS 109 stage take the stricter of the
+        # two. Without this a 90-DPD account read "business as usual".
+        dpd_floor = dpd_regulatory_floor(record.get("dpd"))
+        stage_floor = dpd_floor.stage_floor if dpd_floor else None
+        overlay = None
+        if dpd_floor is not None:
+            overlay = {
+                "rule": "dpd_regulatory_floor",
+                "dpd": float(record["dpd"]),
+                "bucket": dpd_floor.bucket,
+                "stage_floor": dpd_floor.stage_floor,
+                "model_grade": grade,
+                "model_sma_watch": act.sma_watch,
+                "applied": grade_rank(dpd_floor.floor_grade) > grade_rank(grade),
+            }
+            if overlay["applied"]:
+                act = replace(playbook(dpd_floor.floor_grade), sma_watch=dpd_floor.sma_watch)
+                rag = rag_bucket(dpd_floor.floor_grade)
+
         ead = _resolve_ead(record, feats, self.spec.ead_col)
         ecl_info = (
-            calculate_ind_as_109_ecl(pd_hat, ead, grade=grade, lgd=DEFAULT_LGD)
+            calculate_ind_as_109_ecl(
+                pd_hat, ead, grade=grade, lgd=DEFAULT_LGD, stage_floor=stage_floor
+            )
             if ead is not None
             else None
         )
@@ -209,7 +241,7 @@ class RiskScorer:
             "ecl_stage": (
                 ecl_info["ecl_stage"]
                 if ecl_info is not None
-                else assign_ecl_stage(grade)
+                else max(assign_ecl_stage(grade), stage_floor or 1)
             ),
             "lifetime_ecl": (
                 round(ecl_info["lifetime_ecl"], 2)
@@ -221,6 +253,7 @@ class RiskScorer:
             "currency": self.spec.currency,
             "fields_provided": len(provided),
             "fields_defaulted": len(self.spec.raw_defaults) - len(provided),
+            "regulatory_overlay": overlay,
         }
 
         # EWS: base numeric features + any India overlay fields on the request.

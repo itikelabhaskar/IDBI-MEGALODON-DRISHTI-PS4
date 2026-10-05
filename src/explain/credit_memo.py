@@ -25,7 +25,7 @@ def _template_memo(result: dict, borrower_id: str = "the borrower") -> str:
         f"{result['risk_grade']} ({result['risk_band']}), {result['sma_watch']}.\n"
         f"2. Principal drivers: {top}.\n"
         f"3. Early-warning check: {ews_line}.\n"
-        f"4. Estimated 12-month expected credit loss ≈ "
+        f"4. Estimated expected credit loss (Stage {result.get('ecl_stage') or 1} basis) ≈ "
         f"{result.get('currency', '')} {result.get('ecl') or 0:,.0f}.\n"
         f"5. Recommended action: {result['recommended_action']} "
         f"({result['review_cadence']}, owner: {result['action_owner']})."

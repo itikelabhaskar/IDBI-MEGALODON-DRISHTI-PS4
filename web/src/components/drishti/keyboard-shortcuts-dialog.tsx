@@ -82,7 +82,7 @@ export function KeyboardShortcutsDialog({ open, onOpenChange }: KeyboardShortcut
                     <span className="text-foreground flex items-center gap-1.5">
                       {item.description}
                       {item.scope && (
-                        <Badge variant="outline" className="text-[9px] px-1 py-0 border-muted text-muted-foreground">
+                        <Badge variant="outline" className="text-[11px] px-1 py-0 border-muted text-muted-foreground">
                           {item.scope}
                         </Badge>
                       )}
@@ -105,7 +105,7 @@ export function KeyboardShortcutsDialog({ open, onOpenChange }: KeyboardShortcut
         </div>
 
         <div className="p-3 border-t border-border bg-muted/10 text-center text-[11px] text-muted-foreground">
-          Press <kbd className="px-1 py-0.5 bg-muted rounded border text-[10px]">Esc</kbd> anytime to dismiss.
+          Press <kbd className="px-1 py-0.5 bg-muted rounded border text-[11px]">Esc</kbd> anytime to dismiss.
         </div>
       </DialogContent>
     </Dialog>

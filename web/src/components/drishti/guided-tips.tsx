@@ -184,7 +184,7 @@ export function GuidedTipsToggle({
         <span className="font-semibold text-[11px]">Guided Tips:</span>
         <span
           className={cn(
-            "rounded px-1.5 py-0.2 text-[10px] font-bold tracking-wider uppercase",
+            "rounded px-1.5 py-0.2 text-[11px] font-bold tracking-wider uppercase",
             active ? "bg-amber-500/20 text-amber-300" : "bg-muted text-muted-foreground"
           )}
         >
@@ -218,7 +218,7 @@ export function GuidedTipsToggle({
       <span className="hidden sm:inline">Guided Tips:</span>
       <span
         className={cn(
-          "font-bold uppercase tracking-wider text-[10px]",
+          "font-bold uppercase tracking-wider text-[11px]",
           active ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"
         )}
       >

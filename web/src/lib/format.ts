@@ -75,16 +75,39 @@ export function gradeIndexToRag(i: number): RagBucket {
   return i < 4 ? "Green" : i < 7 ? "Amber" : "Red";
 }
 
+/**
+ * Upper PD bound of each grade, RG1..RG9 (RG10 is everything above 65%).
+ * Mirrors _GRADE_EDGES in src/framework/interpretation.py; a test fails if they drift.
+ */
+export const GRADE_EDGES: ReadonlyArray<readonly [string, number]> = [
+  ["RG1", 0.02],
+  ["RG2", 0.04],
+  ["RG3", 0.07],
+  ["RG4", 0.11],
+  ["RG5", 0.16],
+  ["RG6", 0.23],
+  ["RG7", 0.32],
+  ["RG8", 0.45],
+  ["RG9", 0.65],
+];
+
+/** PD range [low, high) of a grade, from GRADE_EDGES. */
+export function gradeRange(grade: string): [number, number] {
+  const i = GRADE_EDGES.findIndex(([g]) => g === grade);
+  if (i < 0) return [GRADE_EDGES[GRADE_EDGES.length - 1][1], 1];
+  return [i === 0 ? 0 : GRADE_EDGES[i - 1][1], GRADE_EDGES[i][1]];
+}
+
 /** Human-readable band legend, derived so it can never drift from the mapping. */
 export const RAG_LEGEND = "Green RG1–RG4 · Amber RG5–RG7 · Red RG8–RG10";
 
 /**
  * PD → chip tone. Uses the interpretation framework's own grade edges
- * (RG5 starts at 0.16 = first Amber, RG8 at 0.45 = first Red) so a PD chip and
- * a RAG chip on the same row can never disagree.
+ * (_GRADE_EDGES holds upper bounds: RG5 starts at 0.11 = first Amber, RG8 at
+ * 0.32 = first Red) so a PD chip and a RAG chip on the same row agree.
  */
 export function pdTone(pd: number): string {
-  if (pd < 0.16) return ragTone.Green;
-  if (pd < 0.45) return ragTone.Amber;
+  if (pd < 0.11) return ragTone.Green;
+  if (pd < 0.32) return ragTone.Amber;
   return ragTone.Red;
 }
